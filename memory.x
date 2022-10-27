@@ -4,12 +4,9 @@ MEMORY
   /* TODO Adjust these memory regions to match your device memory layout */
   /* These values correspond to the LM3S6965, one of the few devices QEMU can emulate */
 
-  /* 3.2 FLASH main features: page size = 2K */
-  FLASH : ORIGIN = 0x08000000, LENGTH = 256K - 1 * 2K
-  SETTINGS: ORIGIN = 0x08000000 + 256K - 1 * 2K, LENGTH = 1 * 2K
+  FLASH : ORIGIN = 0x08000000, LENGTH = 256K
 
   RAM : ORIGIN = 0x20000000, LENGTH = 64K
-  RAM2 : ORIGIN = 0x10000000, LENGTH = 0x4000
 }
 
 /* This is where the call stack will be allocated. */
@@ -17,7 +14,7 @@ MEMORY
 /* You may want to use this variable to locate the call stack and static
    variables in different memory regions. Below is shown the default value */
 /* stack -> RAM2 */
-_stack_start = ORIGIN(RAM2) + LENGTH(RAM2);
+_stack_start = ORIGIN(RAM) + LENGTH(RAM);
 
 /* You can use this symbol to customize the location of the .text section */
 /* If omitted the .text section will be placed right after the .vector_table
@@ -38,11 +35,3 @@ _stack_start = ORIGIN(RAM2) + LENGTH(RAM2);
      } > RAM2
    } INSERT AFTER .bss;
 */
-
-SECTIONS {
-   .settings (NOLOAD) : ALIGN(8)
-   {
-      __settings_pos = .;
-      KEEP(*(.settings*));
-   } > SETTINGS
-}

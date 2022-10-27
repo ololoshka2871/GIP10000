@@ -5,16 +5,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-static PROTOBUF_FILE: &str = "ProtobufDevice_0000E006.proto";
-static PROTOBUF_DIR: &str = "src/protobuf";
-
-fn gen_protobuf() {
-    let mut protofile = PathBuf::from(PROTOBUF_DIR);
-    protofile.push(PROTOBUF_FILE);
-
-    prost_build::compile_protos(&[protofile], &[PROTOBUF_DIR]).unwrap();
-}
-
 fn generate_free_rtos_config<P: AsRef<Path>>(path: P) -> PathBuf {
     let outpath = PathBuf::from(env::var("OUT_DIR").unwrap());
 
@@ -66,6 +56,5 @@ fn build_freertos(mut b: freertos_cargo_build::Builder) {
 }
 
 fn main() {
-    gen_protobuf();
     build_freertos(freertos_cargo_build::Builder::new());
 }
