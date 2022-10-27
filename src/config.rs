@@ -1,28 +1,11 @@
 //-----------------------------------------------------------------------------
 
-#[cfg(feature = "clock-base-12Mhz")]
-pub const XTAL_FREQ: u32 = 12_000_000;
-
-#[cfg(feature = "clock-base-24Mhz")]
-pub const XTAL_FREQ: u32 = 24_000_000;
+pub const XTAL_FREQ: u32 = 25_000_000;
 
 //-----------------------------------------------------------------------------
 // Это же число должно быть записано в src/configTemplate/FreeRTOSConfig.h через build.rs
 
-#[cfg(feature = "recorder-power-save")]
-pub const FREERTOS_CONFIG_FREQ: u32 = 3_000_000; // /4, /8
-
-#[cfg(all(feature = "recorder-balanced", feature = "clock-base-12Mhz"))]
-pub const FREERTOS_CONFIG_FREQ: u32 = 6_000_000; // /2
-
-#[cfg(all(feature = "recorder-balanced", feature = "clock-base-24Mhz"))]
-pub const FREERTOS_CONFIG_FREQ: u32 = 12_000_000; // /2
-
-#[cfg(all(feature = "recorder-performance", feature = "clock-base-12Mhz"))]
-pub const FREERTOS_CONFIG_FREQ: u32 = 12_000_000; // /1
-
-#[cfg(all(feature = "recorder-performance", feature = "clock-base-24Mhz"))]
-pub const FREERTOS_CONFIG_FREQ: u32 = 24_000_000; // /1
+pub const FREERTOS_CONFIG_FREQ: u32 = 60_000_000; // /1
 
 //-----------------------------------------------------------------------------
 

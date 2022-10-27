@@ -2,7 +2,7 @@
 authors = ["ololoshka2871"]
 edition = "2018"
 readme = "README.md"
-name = "GIP10000"
+name = "gip10000"
 version = "0.0.1"
 resolver = "2"
 
@@ -17,7 +17,7 @@ bitflags = "1.0.4"
 
 embedded-hal = { version = "0.2.4", features = ["unproven"] }
 cortex-m = "0.7.3"
-cortex-m-rt = "0.7" # need by stm32l4xx-hal rev == e4835469a38b844865a6d5eef91542bdc6822941
+cortex-m-rt = "0.7"
 
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive"] }
 
@@ -31,9 +31,9 @@ defmt = "0.2"
 defmt-rtt = "0.2"
 panic-abort = "0.3"
 
-stm32l4xx-hal = { git = "https://github.com/stm32-rs/stm32l4xx-hal.git", features = ["rt", "unproven", "stm32-usbd"], tag = "v0.7.1" }
+stm32f4xx-hal = { version = "0.13.2", features = ["rt"] }
 
-freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git" }
+freertos-rust = "0.1.2"
 
 [build-dependencies]
 cc = "1.0.52"
@@ -43,11 +43,11 @@ freertos-cargo-build = "0.1.1"
 opt-level = "z"
 
 [profile.dev]
-lto = false
+codegen-units = 1 # better optimizations
 panic = "abort"
+lto = true
 # Если не влезает
 #opt-level = "z"
-#lto = true
 
 [profile.release]
 opt-level = "s"
@@ -58,13 +58,13 @@ lto = true
 
 [features]
 default = [
-  "stm32l433",
+  "stm32f401",
   "defmt-debug",
   "monitor-heap",
 ]
 
 monitor-heap = ["monitor"]
-stm32l433 = ["stm32l4xx-hal/stm32l433"]
+stm32f401 = ["stm32f4xx-hal/stm32f401"]
 monitor = []
 
 # defmt: do NOT modify these features

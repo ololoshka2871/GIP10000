@@ -1,4 +1,4 @@
-use crate::sensors::freqmeter::master_counter::MasterTimerInfo;
+use crate::time_base::master_counter::MasterTimerInfo;
 
 struct MasterGetter {
     master: MasterTimerInfo,
