@@ -29,11 +29,13 @@ stm32-usbd = "0.6.0"
 # defmt
 defmt = "0.2"
 defmt-rtt = "0.2"
+defmt-macros = "0.2"
+
 panic-abort = "0.3"
 
 stm32f4xx-hal = { version = "0.13.2", features = ["rt"] }
 
-freertos-rust = "0.1.2"
+freertos-rust = { git = "https://github.com/lobaro/FreeRTOS-rust.git" }
 
 [build-dependencies]
 cc = "1.0.52"
@@ -45,7 +47,7 @@ opt-level = "z"
 [profile.dev]
 codegen-units = 1 # better optimizations
 panic = "abort"
-lto = true
+#lto = true
 # Если не влезает
 #opt-level = "z"
 

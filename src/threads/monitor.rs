@@ -1,21 +1,72 @@
-use alloc::{sync::Arc, vec::Vec};
-use freertos_rust::Mutex;
-
-use crate::workmodes::output_storage::OutputStorage;
-
-pub fn monitord<D: freertos_rust::DurationTicks>(
-    period: D,
-    _output: Arc<Mutex<OutputStorage>>,
-) -> ! {
+/*
+pub fn monitord<D: freertos_rust::DurationTicks>(period: D) -> ! {
     use alloc::{format, string::ToString};
-    use defmt::Display2Format;
     use freertos_rust::{CriticalRegion, FreeRtosSchedulerState, FreeRtosUtils};
+
+    static HEADER: &str =
+        "FreeRTOS threadinfo:\n   ID | Name       | State     | Priority | Stack left\n";
+
+    loop {
+        let staticstics: FreeRtosSchedulerState;
+        freertos_rust::CurrentTask::delay(period);
+
+        {
+            let _ = CriticalRegion::enter();
+            staticstics = FreeRtosUtils::get_all_tasks(None);
+        }
+
+        let mut stat = staticstics
+            .tasks
+            .iter()
+            .fold(HEADER.to_string(), |mut acc, task| {
+                let s = format!(
+                    "└─ {id: <2} | {name: <10} | {state: <9} | {priority: <8} | {stack: >10}\n",
+                    id = task.task_number,
+                    name = task.name,
+                    state = alloc::format!("{:?}", task.task_state),
+                    priority = task.current_priority.0,
+                    stack = task.stack_high_water_mark,
+                );
+                acc.push_str(s.as_str());
+                acc
+            });
+
+        #[cfg(feature = "monitor-heap")]
+        {
+            extern "C" {
+                fn xPortGetFreeHeapSize() -> usize;
+                fn xPortGetMinimumEverFreeHeapSize() -> usize;
+            }
+
+            unsafe {
+                stat.push_str(
+                    format!(
+                        "\nHeap statistics: Free {} bytes, Min: {} bytes",
+                        xPortGetFreeHeapSize(),
+                        xPortGetMinimumEverFreeHeapSize()
+                    )
+                    .as_str(),
+                );
+            }
+        }
+
+        defmt::info!("{}", crate::support::defmt_string::DefmtString(&stat));
+    }
+}
+*/
+
+use freertos_rust::FreeRtosSystemState;
+
+pub fn monitord<D: freertos_rust::DurationTicks>(period: D) -> ! {
+    use alloc::vec::Vec;
+    use alloc::{format, string::ToString};
+    use freertos_rust::{CriticalRegion, FreeRtosUtils};
 
     static HEADER: &str = "FreeRTOS threadinfo:\n   ID | Name       | State     | Priority | Stack left | CPU Abs.   |  %\n";
 
-    let mut prev_statistics: Option<FreeRtosSchedulerState> = None;
+    let mut prev_statistics: Option<FreeRtosSystemState> = None;
     loop {
-        let mut staticstics: FreeRtosSchedulerState;
+        let mut staticstics: FreeRtosSystemState;
         freertos_rust::CurrentTask::delay(period);
 
         {
@@ -112,30 +163,6 @@ pub fn monitord<D: freertos_rust::DurationTicks>(
             }
         }
 
-        #[cfg(feature = "monitor-output")]
-        {
-            use crate::threads::sensor_processor::FChannel;
-            use freertos_rust::Duration;
-
-            // Output: | P   | T (*C) | TCPU (*C) | Vbat (v)
-            // Output: |    0.100 |    1.000 |   32.890 |    3.360
-
-            static M_HEADER: &str = "\nOutput: | P         | T (*C)    | TCPU (*C) | Vbat (v)\n";
-            stat.push_str(M_HEADER);
-            let _ = _output.lock(Duration::infinite()).map(|out| {
-                stat.push_str(
-                    format!(
-                        "Output: | {P:<9.3} | {T:<9.3} | {TCPU:<9.3} | {VBAT:<8.3}\n",
-                        P = out.values[FChannel::Pressure as usize].unwrap_or(f64::NAN),
-                        T = out.values[FChannel::Temperature as usize].unwrap_or(f64::NAN),
-                        TCPU = out.t_cpu,
-                        VBAT = out.vbat,
-                    )
-                    .as_str(),
-                );
-            });
-        }
-
-        defmt::info!("{}", Display2Format(&stat));
+        defmt::info!("{}", crate::support::defmt_string::DefmtString(&stat));
     }
 }

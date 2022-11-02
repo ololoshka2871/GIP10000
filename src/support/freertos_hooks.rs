@@ -38,7 +38,6 @@ fn vApplicationMallocFailedHook() {
     defmt::panic!("malloc() failed");
 }
 
-/*
 // libcore panic -> this function
 // need if lto = false
 #[allow(unused_variables)]
@@ -50,4 +49,3 @@ pub extern "C" fn rust_begin_unwind(
 ) -> ! {
     cortex_m::asm::udf();
 }
-*/

@@ -13,9 +13,9 @@ extern crate alloc;
 //mod sensors;
 //mod settings;
 mod support;
-//mod workmodes;
-//mod threads;
+mod threads;
 mod time_base;
+mod workmodes;
 
 pub mod config;
 //pub mod config_pins;
@@ -28,6 +28,12 @@ use cortex_m_rt::entry;
 use stm32f4xx_hal::pac;
 
 use panic_abort as _;
+
+use crate::{
+    support::free_rtos_error_ext::FreeRtosErrorContainer,
+    workmodes::high_performance_mode::HighPerformanceMode,
+};
+use workmodes::WorkMode;
 
 //use crate::support::free_rtos_error_ext::FreeRtosErrorContainer;
 
@@ -48,42 +54,27 @@ fn main() -> ! {
     let p = unsafe { cortex_m::Peripherals::take().unwrap_unchecked() };
     let dp = unsafe { pac::Peripherals::take().unwrap_unchecked() };
 
-    /*
-    let start_res = if is_usb_connected() {
-        defmt::info!("USB connected, CPU max performance mode");
-        start_at_mode::<HighPerformanceMode>(p, dp)
-    } else {
-        defmt::info!("USB not connected, self-writer mode");
-        start_at_mode::<RecorderMode>(p, dp)
-    };
-
-    start_res
+    start_at_mode::<HighPerformanceMode>(p, dp)
         .unwrap_or_else(|e| defmt::panic!("Failed to start thread: {}", FreeRtosErrorContainer(e)));
-    */
 
     freertos_rust::FreeRtosUtils::start_scheduler();
 }
 
-/*
 fn start_at_mode<T>(
     p: cortex_m::Peripherals,
-    dp: stm32::Peripherals,
+    dp: pac::Peripherals,
 ) -> Result<(), freertos_rust::FreeRtosError>
 where
     T: WorkMode<T>,
 {
     let mut mode = T::new(p, dp);
-    mode.ini_static();
     mode.configure_clock();
     mode.print_clock_config();
 
     #[cfg(debug_assertions)]
-    master_value_stat::init_master_getter(
-        sensors::freqmeter::master_counter::MasterCounter::acquire(),
-    );
+    master_value_stat::init_master_getter(time_base::master_counter::MasterCounter::acquire());
 
     mode.start_threads()
 }
-*/
 
 //-----------------------------------------------------------------------------

@@ -1,139 +1,233 @@
 use core::ops::DerefMut;
 
 use alloc::sync::Arc;
-use freertos_rust::{Duration, InterruptContext, Mutex, Task, TaskPriority};
-use my_proc_macro::c_str;
+use alloc::vec::Vec;
+use embedded_hal::digital::v2::OutputPin;
+use freertos_rust::{
+    Duration, FreeRtosError, InterruptContext, Mutex, Task, TaskNotification, TaskPriority,
+};
 use stm32_usbd::UsbBus;
 
-use stm32l4xx_hal::gpio::{Alternate, PushPull};
-use stm32l4xx_hal::interrupt;
+use stm32f1xx_hal::gpio::{self, Floating, Input};
 
-use stm32l4xx_hal::stm32l4::stm32l4x3::Interrupt;
+use stm32f1xx_hal::pac::interrupt;
+use stm32f1xx_hal::stm32::Interrupt;
 
+use stm32f1xx_hal::usb::Peripheral;
 use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
-use usbd_scsi::Scsi;
 use usbd_serial::SerialPort;
 
-use crate::{
-    support::{self},
-    threads::{protobuf_server, usb_periph::UsbPeriph, vfs::EMfatStorage},
-};
+use crate::support::{self};
 
 static mut USBD_THREAD: Option<freertos_rust::Task> = None;
-static mut USB_BUS: Option<UsbBusAllocator<UsbBus<UsbPeriph>>> = None;
 
-pub struct UsbdPeriph {
-    pub usb: stm32l4xx_hal::device::USB,
-    pub pin_dm: stm32l4xx_hal::gpio::PA11<Alternate<PushPull, 10>>,
-    pub pin_dp: stm32l4xx_hal::gpio::PA12<Alternate<PushPull, 10>>,
+static mut USBD: Option<Usbd> = None;
+
+pub struct UsbdPeriph<PIN: OutputPin> {
+    pub usb: stm32f1xx_hal::device::USB,
+    pub pin_dm: gpio::PA11<Input<Floating>>,
+    pub pin_dp: gpio::PA12<Input<Floating>>,
+    pub usb_pull_up: PIN,
 }
 
-pub fn usbd(
-    usbd_periph: UsbdPeriph,
+pub struct Usbd {
+    usb_bus: UsbBusAllocator<UsbBus<Peripheral>>,
     interrupt_controller: Arc<dyn support::interrupt_controller::IInterruptController>,
     interrupt_prio: u8,
-    output: Arc<Mutex<crate::workmodes::output_storage::OutputStorage>>,
-    cq: Arc<freertos_rust::Queue<super::sensor_processor::Command>>,
-) -> ! {
-    defmt::info!("Usb thread started!");
 
-    unsafe {
-        USBD_THREAD = Some(freertos_rust::Task::current().unwrap_unchecked());
-    }
+    serial: Option<SerialPort<'static, UsbBus<Peripheral>>>,
+    serial_port: Option<Arc<Mutex<&'static mut SerialPort<'static, UsbBus<Peripheral>>>>>,
 
-    defmt::info!("Creating usb low-level driver: PA11, PA12, AF10");
+    subscribers: Vec<Task>,
+}
 
-    unsafe {
-        // Должен быть статик, так как заимствуется сущностью, которая будет статик.
-        USB_BUS = Some(UsbBus::new(UsbPeriph {
-            usb: usbd_periph.usb,
-            pin_dm: usbd_periph.pin_dm,
-            pin_dp: usbd_periph.pin_dp,
-        }))
-    }
+impl Usbd {
+    pub fn init<PIN: OutputPin>(
+        mut usbd_periph: UsbdPeriph<PIN>,
+        interrupt_controller: Arc<dyn support::interrupt_controller::IInterruptController>,
+        interrupt_prio: u8,
+        usb_pull_up_cative_state: embedded_hal::digital::v2::PinState,
+    ) {
+        if unsafe { USBD.is_some() } {
+            return;
+        }
 
-    defmt::info!("Allocating SCSI device");
-    let mut scsi = Scsi::new(
-        unsafe { USB_BUS.as_ref().unwrap_unchecked() }, //&usb_bus,
-        64, // для устройств full speed: max_packet_size 8, 16, 32 or 64
-        EMfatStorage::new(c_str!("LOGGER")),
-        "SCTB", // <= max 8 больших букв
-        "SelfWriter",
-        "L442",
-    );
+        defmt::info!("Creating usb low-level driver");
 
-    defmt::info!("Allocating ACM device");
-    let serial = SerialPort::new(unsafe { USB_BUS.as_ref().unwrap_unchecked() });
+        let res = Self {
+            usb_bus: UsbBus::new(Peripheral {
+                usb: usbd_periph.usb,
+                pin_dm: usbd_periph.pin_dm,
+                pin_dp: usbd_periph.pin_dp,
+            }),
+            interrupt_controller,
+            interrupt_prio,
 
-    let serial_container =
-        Arc::new(Mutex::new(serial).expect("Failed to create serial guard mutex"));
+            serial: None,
+            serial_port: None,
 
-    let vid_pid = UsbVidPid(0x0483, 0x5720);
-    defmt::info!("Building usb device: vid={} pid={}", &vid_pid.0, &vid_pid.1);
-    let mut usb_dev =
-        UsbDeviceBuilder::new(unsafe { USB_BUS.as_ref().unwrap_unchecked() }, vid_pid)
-            .manufacturer("SCTB ELPA")
-            .product("Pressure self-registrator")
-            .serial_number("0123456789")
-            //.device_class(0) // Это не нужно для композита
-            .composite_with_iads()
-            .build();
-
-    defmt::trace!("Set usb interrupt prio = {}", interrupt_prio);
-    interrupt_controller.set_priority(Interrupt::USB_FS.into(), interrupt_prio);
-
-    defmt::info!("USB ready!");
-
-    let protobuf_srv = {
-        let sn = serial_container.clone();
-        defmt::trace!("Creating protobuf server thread...");
-        Task::new()
-            .name("Protobuf")
-            .stack_size(2048)
-            .priority(TaskPriority(crate::config::PROTOBUF_TASK_PRIO))
-            .start(move |_| protobuf_server::protobuf_server(sn, output, cq))
-            .expect("Failed to create protobuf server")
-    };
-
-    loop {
-        // Важно! Список передаваемый сюда в том же порядке,
-        // что были инициализированы интерфейсы
-        let res = match serial_container.lock(Duration::ms(1)) {
-            Ok(mut serial) => usb_dev.poll(&mut [&mut scsi, serial.deref_mut()]),
-            Err(_) => true,
+            subscribers: Vec::new(),
         };
 
-        if !res {
-            crate::support::led::led_set(0);
-            // block until usb interrupt
-            // interrupt_controller.unpend(Interrupt::USB_FS.into()); // без этого скорость в 1,5 раза выше
-            interrupt_controller.unmask(Interrupt::USB_FS.into());
-
-            unsafe {
-                let _ = freertos_rust::Task::current()
-                    .unwrap_unchecked()
-                    // ожидаем, что нотификационное значение будет > 0
-                    .take_notification(true, Duration::infinite());
-            }
-
-            interrupt_controller.mask(Interrupt::USB_FS.into());
-        } else {
-            crate::support::led::led_set(1);
-            protobuf_srv.notify(freertos_rust::TaskNotification::Increment);
+        unsafe {
+            // Должен быть статик, так как заимствуется сущностью, которая будет статик.
+            USBD = Some(res);
         }
+        let _ = usbd_periph.usb_pull_up.set_state(usb_pull_up_cative_state);
+    }
+
+    fn get_static_self() -> &'static mut Usbd {
+        unsafe { USBD.as_mut().expect("Call Usbd::init() first!") }
+    }
+
+    pub fn serial_port() -> Arc<Mutex<&'static mut SerialPort<'static, UsbBus<Peripheral>>>> {
+        let mut _self = Self::get_static_self();
+
+        if _self.serial_port.is_none() {
+            defmt::info!("Allocating ACM device");
+            _self.serial = Some(SerialPort::new(&_self.usb_bus));
+
+            _self.serial_port = Some(Arc::new(
+                Mutex::new(_self.serial.as_mut().unwrap())
+                    .expect("Failed to create serial guard mutex"),
+            ));
+        }
+        _self.serial_port.as_ref().unwrap().clone()
+    }
+
+    pub fn subscribe(task: Task) {
+        let mut _self = Self::get_static_self();
+
+        _self.subscribers.push(task);
+    }
+
+    pub fn strat(
+        vid_pid: UsbVidPid,
+        name: &'static str,
+        manufacturer: &'static str,
+        serial: &'static str,
+        stack_size: usize,
+        priority: TaskPriority,
+    ) -> Result<(), FreeRtosError> {
+        let mut _self = Self::get_static_self();
+
+        let thread = Task::new()
+            .name("Usbd")
+            .stack_size((stack_size / core::mem::size_of::<u32>()) as u16)
+            .priority(priority)
+            .start(move |_| {
+                defmt::info!("Usb thread started!");
+                defmt::info!("Building usb device: vid={} pid={}", &vid_pid.0, &vid_pid.1);
+
+                let mut usb_dev = UsbDeviceBuilder::new(&_self.usb_bus, vid_pid)
+                    .manufacturer(manufacturer)
+                    .product(name)
+                    .serial_number(serial)
+                    .composite_with_iads()
+                    .build();
+
+                {
+                    defmt::trace!("Set usb interrupt prio = {}", _self.interrupt_prio);
+                    _self
+                        .interrupt_controller
+                        .set_priority(Interrupt::USB_HP_CAN_TX.into(), _self.interrupt_prio);
+                    _self
+                        .interrupt_controller
+                        .set_priority(Interrupt::USB_LP_CAN_RX0.into(), _self.interrupt_prio);
+                }
+
+                defmt::info!("USB ready!");
+
+                let serial_port = _self
+                    .serial_port
+                    .as_ref()
+                    .expect("call Usbd::serial_port() before!");
+
+                loop {
+                    // Важно! Список передаваемый сюда в том же порядке,
+                    // что были инициализированы интерфейсы
+                    let res = match serial_port.lock(Duration::ms(1)) {
+                        Ok(mut serial) => usb_dev.poll(&mut [*serial.deref_mut()]),
+                        Err(_) => true,
+                    };
+
+                    if res {
+                        // crate::support::led::led_set(1);
+                        _self
+                            .subscribers
+                            .iter()
+                            .for_each(|s| s.notify(TaskNotification::Increment));
+
+                        support::mast_yield();
+                    } else {
+                        // crate::support::led::led_set(0);
+
+                        // block until usb interrupt
+                        cortex_m::interrupt::free(|_| {
+                            _self
+                                .interrupt_controller
+                                .unmask(Interrupt::USB_HP_CAN_TX.into());
+                            _self
+                                .interrupt_controller
+                                .unmask(Interrupt::USB_LP_CAN_RX0.into());
+                        });
+
+                        unsafe {
+                            let _ = freertos_rust::Task::current()
+                                .unwrap_unchecked()
+                                // ожидаем, что нотификационное значение будет > 0
+                                .take_notification(true, Duration::infinite());
+                        }
+
+                        cortex_m::interrupt::free(|_| {
+                            _self
+                                .interrupt_controller
+                                .mask(Interrupt::USB_HP_CAN_TX.into());
+                            _self
+                                .interrupt_controller
+                                .mask(Interrupt::USB_LP_CAN_RX0.into());
+                        });
+                    }
+                }
+            })?;
+
+        unsafe {
+            USBD_THREAD = Some(thread);
+        }
+
+        Ok(())
     }
 }
 
 // USB exception
-
 // ucCurrentPriority >= ucMaxSysCallPriority (80)
+
 #[interrupt]
-unsafe fn USB_FS() {
+unsafe fn USB_HP_CAN_TX() {
+    use cortex_m::peripheral::NVIC;
+
+    usb_interrupt();
+
+    NVIC::mask(Interrupt::USB_HP_CAN_TX);
+    NVIC::unpend(Interrupt::USB_HP_CAN_TX);
+}
+
+#[interrupt]
+unsafe fn USB_LP_CAN_RX0() {
+    use cortex_m::peripheral::NVIC;
+
+    usb_interrupt();
+
+    NVIC::mask(Interrupt::USB_LP_CAN_RX0);
+    NVIC::unpend(Interrupt::USB_LP_CAN_RX0);
+}
+
+unsafe fn usb_interrupt() {
     let interrupt_ctx = InterruptContext::new();
     if let Some(usbd) = USBD_THREAD.as_ref() {
         // Результат не особо важен
         // инкремент нотификационного значения
-        let _ = usbd.notify_from_isr(&interrupt_ctx, freertos_rust::TaskNotification::Increment);
+        let _ = usbd.notify_from_isr(&interrupt_ctx, TaskNotification::Increment);
     }
 
     // Как только прерывание случилось, мы посылаем сигнал потоку
@@ -141,6 +235,6 @@ unsafe fn USB_FS() {
     // бесконечно в него заходить по кругу, нужно запретить пока что это
     // прерывание
     // TODO: device independent layer
-    cortex_m::peripheral::NVIC::mask(Interrupt::USB_FS);
-    cortex_m::peripheral::NVIC::unpend(Interrupt::USB_FS);
+    // cortex_m::peripheral::NVIC::mask(Interrupt::USB...);
+    // cortex_m::peripheral::NVIC::unpend(Interrupt::USB...);
 }

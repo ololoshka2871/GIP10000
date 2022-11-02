@@ -3,7 +3,7 @@
 use core::convert::Infallible;
 
 use alloc::boxed::Box;
-use stm32l4xx_hal::prelude::OutputPin;
+use embedded_hal::digital::v2::OutputPin;
 
 struct MyPin(pub Box<dyn OutputPin<Error = Infallible>>);
 
