@@ -35,8 +35,6 @@ use crate::{
 };
 use workmodes::WorkMode;
 
-//use crate::support::free_rtos_error_ext::FreeRtosErrorContainer;
-
 //---------------------------------------------------------------
 
 #[global_allocator]
