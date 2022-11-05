@@ -12,6 +12,7 @@ extern crate alloc;
 //mod protobuf;
 //mod sensors;
 //mod settings;
+mod output;
 mod support;
 mod threads;
 mod time_base;

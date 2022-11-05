@@ -7,7 +7,10 @@ use stm32f4xx_hal::gpio::{
 };
 use stm32f4xx_hal::{gpio::PushPull, prelude::*, time::Hertz};
 
-use crate::support::{interrupt_controller::IInterruptController, InterruptController};
+use crate::{
+    output::Framebuffer,
+    support::{interrupt_controller::IInterruptController, InterruptController},
+};
 
 use super::WorkMode;
 
@@ -25,6 +28,8 @@ pub struct HighPerformanceMode {
     display_timer: stm32f4xx_hal::pac::TIM11,
 
     led_pin: stm32f4xx_hal::gpio::Pin<'C', 13, Output>,
+
+    gip10000: Framebuffer,
 }
 
 impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
@@ -57,6 +62,8 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
             usb_dm: gpioa.pa11.into_alternate(),
             usb_dp: gpioa.pa12.into_alternate(),
+
+            gip10000: Framebuffer::new(),
         }
     }
 
@@ -71,7 +78,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         );
     }
 
-    fn start_threads(self) -> Result<(), freertos_rust::FreeRtosError> {
+    fn start_threads(mut self) -> Result<(), freertos_rust::FreeRtosError> {
         use crate::threads::usbd::{Usbd, UsbdPeriph};
         use freertos_rust::TaskPriority;
 
@@ -120,12 +127,15 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             usb_device::prelude::UsbVidPid(0x0483, 0x573E),
             "gip10000",
             "MKsoft",
-            "0",
+            "1",
             crate::config::USBD_TASK_STACK_SIZE,
             TaskPriority(crate::config::USBD_TASK_PRIO),
         );
 
         // --------------------------------------------------------------------
+
+        // fixme не дропать!
+        self.gip10000.start();
 
         crate::workmodes::common::create_monitor(sys_clk)?;
 
