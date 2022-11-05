@@ -22,6 +22,9 @@ pub const USB_INTERRUPT_PRIO: u8 = MASTER_COUNTER_INTERRUPT_PRIO + 1;
 // dma value captured interrupt prio
 pub const DMA_IRQ_PRIO: u8 = IRQ_HIGEST_PRIO + 5;
 
+/// column update counter interrupt prio
+pub const UPDATE_COUNTER_INTERRUPT_PRIO: u8 = IRQ_HIGEST_PRIO + 6;
+
 //-----------------------------------------------------------------------------
 
 // Приоритеты, обльше -> лучше

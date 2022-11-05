@@ -1,11 +1,20 @@
+use core::cell::RefCell;
+use core::ops::DerefMut;
+
 use alloc::sync::Arc;
 
+use cortex_m::interrupt::Mutex;
+use stm32f4xx_hal::dma::StreamsTuple;
+use stm32f4xx_hal::gpio::PA5;
 #[allow(unused_imports)]
 use stm32f4xx_hal::gpio::{
     Alternate, Analog, Output, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6, PA7, PA8, PB0, PC10,
     PD10, PD11, PD13, PE12,
 };
-use stm32f4xx_hal::{gpio::PushPull, prelude::*, time::Hertz};
+
+use stm32f4xx_hal::pac::{interrupt, DMA2, SPI1};
+use stm32f4xx_hal::spi::NoMiso;
+use stm32f4xx_hal::{gpio::PushPull, pac::Interrupt as IRQ, pac::TIM11, prelude::*, time::Hertz};
 
 use crate::{
     output::Framebuffer,
@@ -13,6 +22,21 @@ use crate::{
 };
 
 use super::WorkMode;
+
+static DISPLAY: Mutex<
+    RefCell<
+        Option<
+            Framebuffer<
+                SPI1,
+                (PA5, NoMiso, PA7),
+                stm32f4xx_hal::gpio::Pin<'A', 1, Output>,
+                TIM11,
+                DMA2,
+                3,
+            >,
+        >,
+    >,
+> = Mutex::new(RefCell::new(None));
 
 #[allow(unused)]
 pub struct HighPerformanceMode {
@@ -25,11 +49,7 @@ pub struct HighPerformanceMode {
     usb_dp: PA12<Alternate<10, PushPull>>,
     interrupt_controller: Arc<dyn IInterruptController>,
 
-    display_timer: stm32f4xx_hal::pac::TIM11,
-
     led_pin: stm32f4xx_hal::gpio::Pin<'C', 13, Output>,
-
-    gip10000: Framebuffer,
 }
 
 impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
@@ -41,20 +61,60 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         let gpioa = dp.GPIOA.split();
         let gpioc = dp.GPIOC.split();
 
+        // https://docs.rs/crate/stm32f4xx-hal/0.13.2/source/examples/spi_dma.rs
+        // let spi2 = Spi::new(dp.SPI2, (pb13, NoMiso {}, pb15), mode, 3.MHz(), &clocks);
+        // https://docs.rs/crate/stm32f4xx-hal/0.13.2/source/examples/i2s-audio-out-dma.rs
+        // https://docs.rs/crate/stm32f4xx-hal/0.13.2/source/examples/stopwatch-with-ssd1306-and-interrupts.rs
+
+        let clocks = rcc
+            .cfgr
+            .use_hse(Hertz::Hz(crate::config::XTAL_FREQ))
+            .require_pll48clk()
+            .sysclk(Hertz::Hz(crate::config::FREERTOS_CONFIG_FREQ))
+            .freeze();
+
+        let mut timer = dp.TIM11.counter(&clocks);
+        timer.listen(stm32f4xx_hal::timer::Event::Update);
+
+        ic.set_priority(
+            IRQ::TIM1_TRG_COM_TIM11.into(),
+            crate::config::UPDATE_COUNTER_INTERRUPT_PRIO,
+        );
+        ic.unmask(IRQ::TIM1_TRG_COM_TIM11.into());
+
+        let spi1 = dp.SPI1.spi(
+            (gpioa.pa5, NoMiso {}, gpioa.pa7.internal_pull_up(true)),
+            stm32f4xx_hal::spi::Mode {
+                polarity: stm32f4xx_hal::spi::Polarity::IdleLow,
+                phase: stm32f4xx_hal::spi::Phase::CaptureOnFirstTransition,
+            },
+            10.MHz(),
+            &clocks,
+        );
+
+        let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
+
+        let gip10000 = Framebuffer::new(
+            timer,
+            spi1,
+            gpioa
+                .pa1
+                .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::High),
+            spi1_dma,
+        );
+
+        cortex_m::interrupt::free(|cs| {
+            DISPLAY.borrow(cs).replace(Some(gip10000));
+        });
+
         HighPerformanceMode {
             usb_global: dp.OTG_FS_GLOBAL,
             usb_device: dp.OTG_FS_DEVICE,
             usb_pwrclk: dp.OTG_FS_PWRCLK,
 
-            clocks: rcc
-                .cfgr
-                .use_hse(Hertz::Hz(crate::config::XTAL_FREQ))
-                .require_pll48clk()
-                .sysclk(Hertz::Hz(crate::config::FREERTOS_CONFIG_FREQ))
-                .freeze(),
+            clocks,
 
             interrupt_controller: ic,
-            display_timer: dp.TIM11,
 
             led_pin: gpioc
                 .pc13
@@ -62,8 +122,6 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
             usb_dm: gpioa.pa11.into_alternate(),
             usb_dp: gpioa.pa12.into_alternate(),
-
-            gip10000: Framebuffer::new(),
         }
     }
 
@@ -78,7 +136,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         );
     }
 
-    fn start_threads(mut self) -> Result<(), freertos_rust::FreeRtosError> {
+    fn start_threads(self) -> Result<(), freertos_rust::FreeRtosError> {
         use crate::threads::usbd::{Usbd, UsbdPeriph};
         use freertos_rust::TaskPriority;
 
@@ -134,8 +192,11 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
         // --------------------------------------------------------------------
 
-        // fixme не дропать!
-        self.gip10000.start();
+        cortex_m::interrupt::free(|cs| {
+            if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
+                disp.start();
+            }
+        });
 
         crate::workmodes::common::create_monitor(sys_clk)?;
 
@@ -145,4 +206,14 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
     fn print_clock_config(&self) {
         super::common::print_clock_config(&self.clocks);
     }
+}
+
+#[cfg(feature = "stm32f401")]
+#[interrupt]
+unsafe fn TIM1_TRG_COM_TIM11() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
+            disp.on_timer();
+        }
+    })
 }
