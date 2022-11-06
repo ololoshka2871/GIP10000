@@ -40,6 +40,24 @@
                 "skip -rfu ^alloc::",
                 "break main",
             ]
-        }
+        },
+        {
+            // all params: https://github.com/Marus/cortex-debug/blob/master/debug_attributes.md
+            "name": "cortex-debug (Debug) Remote",
+            "type": "cortex-debug",
+            "cwd": "${workspaceRoot}",
+            "executable": "target/thumbv7em-none-eabihf/debug/gip10000", // бинарь
+            "request": "attach", // позволяет не прошивать таргет при запуске
+            "loadFiles": false, 
+            "svdFile": "${workspaceRoot}/STM32F401.svd",
+            "servertype": "external", // Подключиться к внешнему отладочному интерфейсу
+            "gdbTarget": "192.168.1.95:2331", // адрес куда подключаться
+            "postAttachCommands": [
+                "skip -rfunction ^core::",
+                "skip -rfu ^compiler_builtins::",
+                "skip -rfu ^alloc::",
+                "break main",
+            ]
+        },
     ]
 }

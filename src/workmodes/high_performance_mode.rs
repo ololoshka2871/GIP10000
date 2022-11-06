@@ -9,7 +9,7 @@ use stm32f4xx_hal::gpio::PA5;
 #[allow(unused_imports)]
 use stm32f4xx_hal::gpio::{
     Alternate, Analog, Output, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6, PA7, PA8, PB0, PC10,
-    PD10, PD11, PD13, PE12,
+    PC13, PD10, PD11, PD13, PE12,
 };
 
 use stm32f4xx_hal::pac::{interrupt, DMA2, SPI1};
@@ -17,7 +17,7 @@ use stm32f4xx_hal::spi::NoMiso;
 use stm32f4xx_hal::{gpio::PushPull, pac::Interrupt as IRQ, pac::TIM11, prelude::*, time::Hertz};
 
 use crate::{
-    output::Framebuffer,
+    output::Gip10000llDriver,
     support::{interrupt_controller::IInterruptController, InterruptController},
 };
 
@@ -26,10 +26,14 @@ use super::WorkMode;
 static DISPLAY: Mutex<
     RefCell<
         Option<
-            Framebuffer<
+            Gip10000llDriver<
                 SPI1,
-                (PA5, NoMiso, PA7),
-                stm32f4xx_hal::gpio::Pin<'A', 1, Output>,
+                (
+                    PA5<Alternate<5, PushPull>>,
+                    NoMiso,
+                    PA7<Alternate<5, PushPull>>,
+                ),
+                PA1<Output>,
                 TIM11,
                 DMA2,
                 3,
@@ -49,7 +53,7 @@ pub struct HighPerformanceMode {
     usb_dp: PA12<Alternate<10, PushPull>>,
     interrupt_controller: Arc<dyn IInterruptController>,
 
-    led_pin: stm32f4xx_hal::gpio::Pin<'C', 13, Output>,
+    led_pin: PC13<Output>,
 }
 
 impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
@@ -83,7 +87,11 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         ic.unmask(IRQ::TIM1_TRG_COM_TIM11.into());
 
         let spi1 = dp.SPI1.spi(
-            (gpioa.pa5, NoMiso {}, gpioa.pa7.internal_pull_up(true)),
+            (
+                gpioa.pa5.into_alternate(),
+                NoMiso {},
+                gpioa.pa7.into_alternate(),
+            ),
             stm32f4xx_hal::spi::Mode {
                 polarity: stm32f4xx_hal::spi::Polarity::IdleLow,
                 phase: stm32f4xx_hal::spi::Phase::CaptureOnFirstTransition,
@@ -94,7 +102,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
 
         let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
 
-        let gip10000 = Framebuffer::new(
+        let gip10000 = Gip10000llDriver::new(
             timer,
             spi1,
             gpioa
@@ -214,6 +222,16 @@ unsafe fn TIM1_TRG_COM_TIM11() {
     cortex_m::interrupt::free(|cs| {
         if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
             disp.on_timer();
+        }
+    })
+}
+
+#[cfg(feature = "stm32f401")]
+#[interrupt]
+unsafe fn DMA2_STREAM3() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
+            disp.on_dma();
         }
     })
 }

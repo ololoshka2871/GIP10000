@@ -58,3 +58,10 @@ dependencies = ["build"]
 
 [tasks.fl]
 dependencies = ["flash", "log"]
+
+##############
+
+[tasks.flashr]
+command = "arm-none-eabi-gdb"
+args = ["-x", "flashr.gdb"]
+dependencies = ["build"]

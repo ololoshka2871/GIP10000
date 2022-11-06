@@ -1,14 +1,18 @@
 use core::convert::Infallible;
 
 use stm32f4xx_hal::{
-    dma::StreamX,
+    dma::{
+        self,
+        traits::{self, StreamISR},
+        ChannelX, StreamX,
+    },
     spi::Spi,
     timer::{self, CounterUs},
 };
 
 use super::{
     anodes_driver::AnodesDriver, catodes_selector::CatodesSelector, paralel_bus::ParalelBus,
-    serial_bus::SerialBus,
+    serial_bus::SerialBus, static_buf_reader::StaticBufReader,
 };
 
 const ROWS_BYTES: usize = 13; // 100 // 8 + 1
@@ -17,7 +21,15 @@ const COLUMNS_COUNT: usize = 100;
 static mut FRONT_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 static mut BACK_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 
-pub struct Framebuffer<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8> {
+pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8>
+where
+    DMA: stm32f4xx_hal::dma::traits::Instance,
+    StreamX<DMA, S>: StreamISR,
+    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
+    stm32f4xx_hal::spi::Tx<SPIDEV>:
+        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
+    SPIDEV: stm32f4xx_hal::spi::Instance,
+{
     catodes: CatodesSelector<u8, ParalelBus<u8>>,
     anodes: AnodesDriver<SerialBus<SPIDEV, SPIPINS, DMA, S>, ALATCH>,
     timer: CounterUs<TIM>,
@@ -29,10 +41,16 @@ pub struct Framebuffer<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8> {
 }
 
 impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8>
-    Framebuffer<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
+    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
 where
+    DMA: stm32f4xx_hal::dma::traits::Instance,
+    StreamX<DMA, S>: StreamISR,
+    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
+    stm32f4xx_hal::spi::Tx<SPIDEV>:
+        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
+    SPIDEV: stm32f4xx_hal::spi::Instance,
     ALATCH: embedded_hal::digital::v2::OutputPin<Error = Infallible>,
-    TIM: timer::Instance,
+    TIM: stm32f4xx_hal::timer::Instance,
 {
     pub fn new(
         timer: CounterUs<TIM>,
@@ -67,24 +85,16 @@ where
 
     pub fn start(&mut self) {
         use stm32f4xx_hal::prelude::*;
-        self.timer.start(1.micros()).unwrap();
+        self.timer.start(10.micros()).unwrap();
     }
 
     fn next_column(&mut self) {
-        self.catodes.disable();
-
         let col = self.catodes.select_column(self.col_counter);
 
         let from = col as usize * ROWS_BYTES;
         let to = col as usize * (ROWS_BYTES + 1);
-
-        let catodes = &mut self.catodes;
-        self.anodes
-            .set_colum_pixels_and_then(&self.front_buffer[from..to], move || {
-                catodes.enable_with(col);
-            });
-
-        self.col_counter += 1;
+        let data = StaticBufReader::from(self.front_buffer[from..to].as_ptr_range());
+        self.anodes.set_colum_pixels(data);
     }
 
     pub fn on_timer(&mut self) {
@@ -94,11 +104,30 @@ where
 
         self.next_column()
     }
+
+    pub fn on_dma(&mut self) {
+        self.catodes.disable();
+
+        let catodes = &self.catodes;
+        let col_counter = self.col_counter;
+        let col = self
+            .anodes
+            .latch_with(move || catodes.select_column(col_counter));
+
+        self.catodes.enable_with(col);
+
+        self.col_counter = (self.col_counter + 1) % COLUMNS_COUNT as u8;
+    }
 }
 
-unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8> Sync for Framebuffer<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
+unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8> Sync
+    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
 where
-    ALATCH: embedded_hal::digital::v2::OutputPin<Error = Infallible>,
-    TIM: timer::Instance,
+    DMA: stm32f4xx_hal::dma::traits::Instance,
+    StreamX<DMA, S>: StreamISR,
+    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
+    stm32f4xx_hal::spi::Tx<SPIDEV>:
+        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
+    SPIDEV: stm32f4xx_hal::spi::Instance,
 {
 }

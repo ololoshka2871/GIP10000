@@ -5,6 +5,7 @@
 #![feature(alloc_error_handler)]
 #![allow(incomplete_features)]
 #![feature(adt_const_params)]
+#![feature(slice_from_ptr_range)]
 
 extern crate alloc;
 
