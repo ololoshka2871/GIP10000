@@ -84,6 +84,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             IRQ::TIM1_TRG_COM_TIM11.into(),
             crate::config::UPDATE_COUNTER_INTERRUPT_PRIO,
         );
+        ic.unpend(IRQ::TIM1_TRG_COM_TIM11.into());
         ic.unmask(IRQ::TIM1_TRG_COM_TIM11.into());
 
         let spi1 = dp.SPI1.spi(
@@ -96,11 +97,17 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 polarity: stm32f4xx_hal::spi::Polarity::IdleLow,
                 phase: stm32f4xx_hal::spi::Phase::CaptureOnFirstTransition,
             },
-            1.MHz(),
+            8.MHz(),
             &clocks,
         );
 
         let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
+        ic.set_priority(
+            IRQ::DMA2_STREAM3.into(),
+            crate::config::UPDATE_COUNTER_INTERRUPT_PRIO,
+        );
+        ic.unpend(IRQ::DMA2_STREAM3.into());
+        ic.unmask(IRQ::DMA2_STREAM3.into());
 
         let gip10000 = Gip10000llDriver::new(
             timer,
@@ -229,6 +236,7 @@ unsafe fn TIM1_TRG_COM_TIM11() {
 #[cfg(feature = "stm32f401")]
 #[interrupt]
 unsafe fn DMA2_STREAM3() {
+    crate::support::led::led_set(1);
     cortex_m::interrupt::free(|cs| {
         if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
             disp.on_dma();

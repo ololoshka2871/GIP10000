@@ -12,7 +12,7 @@ use stm32f4xx_hal::{
 
 use super::{
     anodes_driver::AnodesDriver, catodes_selector::CatodesSelector, paralel_bus::ParalelBus,
-    spi_bus::SPIBus, static_buf_reader::StaticBufReader,
+    static_buf_reader::StaticBufReader,
 };
 
 const ROWS_BYTES: usize = 13; // 100 // 8 + 1
@@ -31,7 +31,7 @@ where
     SPIDEV: stm32f4xx_hal::spi::Instance,
 {
     catodes: CatodesSelector<u8, ParalelBus<u8>>,
-    anodes: AnodesDriver<SPIBus<SPIDEV, SPIPINS, DMA, S>, ALATCH>,
+    anodes: AnodesDriver<SPIDEV, SPIPINS, DMA, ALATCH, S>,
     timer: CounterUs<TIM>,
 
     front_buffer: &'static mut [u8],
@@ -64,7 +64,7 @@ where
 
         Self {
             catodes: CatodesSelector::new(ParalelBus::new()),
-            anodes: AnodesDriver::new(SPIBus::new(spi, dma_ch), a_latch),
+            anodes: AnodesDriver::new(spi, dma_ch, a_latch),
             timer,
 
             front_buffer: unsafe { &mut FRONT_BUFFER },
@@ -89,7 +89,7 @@ where
 
     pub fn start(&mut self) {
         use stm32f4xx_hal::prelude::*;
-        self.timer.start(10.micros()).unwrap();
+        self.timer.start(100.micros()).unwrap();
     }
 
     fn next_column(&mut self) {
@@ -110,6 +110,7 @@ where
     }
 
     pub fn on_dma(&mut self) {
+        self.anodes.write_done();
         self.catodes.disable();
 
         let catodes = &self.catodes;
