@@ -1,13 +1,17 @@
 use core::marker::PhantomData;
 
 use stm32f4xx_hal::{
-    dma::{self, traits, ChannelX, MemoryToPeripheral, StreamX, Transfer},
+    dma::{
+        self,
+        traits::{self, PeriAddress},
+        ChannelX, MemoryToPeripheral, StreamX, Transfer,
+    },
     spi::{Spi, Tx},
 };
 
 use super::static_buf_reader::StaticBufReader;
 
-pub struct SerialBus<SPIDEV, SPIPINS, DMA, const S: u8>
+pub struct SPIBus<SPIDEV, SPIPINS, DMA, const S: u8>
 where
     SPIDEV: stm32f4xx_hal::spi::Instance,
     DMA: traits::Instance,
@@ -19,7 +23,7 @@ where
     _pins: PhantomData<SPIPINS>,
 }
 
-impl<SPIDEV, SPIPINS, DMA, const S: u8> SerialBus<SPIDEV, SPIPINS, DMA, S>
+impl<SPIDEV, SPIPINS, DMA, const S: u8> SPIBus<SPIDEV, SPIPINS, DMA, S>
 where
     SPIDEV: stm32f4xx_hal::spi::Instance,
     DMA: traits::Instance,
@@ -27,7 +31,8 @@ where
     ChannelX<S>: traits::Channel,
     stm32f4xx_hal::spi::Tx<SPIDEV>: traits::DMASet<StreamX<DMA, S>, S, dma::MemoryToPeripheral>,
 {
-    pub fn new(spi: Spi<SPIDEV, SPIPINS>, dma_ch: StreamX<DMA, S>) -> Self {
+    pub fn new(mut spi: Spi<SPIDEV, SPIPINS>, dma_ch: StreamX<DMA, S>) -> Self {
+        //cortex_m::prelude::_embedded_hal_blocking_spi_Write::write(&mut spi, &[0]).unwrap();
         Self {
             transfer: Transfer::init_memory_to_peripheral(
                 dma_ch,
@@ -46,7 +51,7 @@ where
 }
 
 impl<SPIDEV, SPIPINS, DMA, const S: u8> super::bus::Bus<StaticBufReader>
-    for SerialBus<SPIDEV, SPIPINS, DMA, S>
+    for SPIBus<SPIDEV, SPIPINS, DMA, S>
 where
     SPIDEV: stm32f4xx_hal::spi::Instance,
     DMA: traits::Instance,
@@ -56,5 +61,11 @@ where
 {
     fn write(&mut self, data: StaticBufReader) {
         self.transfer.next_transfer(data).unwrap();
+        /* триггерить на самом деле не надо, видимо то, что SPI готов к передаче - это флаг TXE и его достаточно для DMA
+        self.transfer.start(|ch| unsafe {
+            let dr = &*(ch.address() as *mut stm32f4xx_hal::pac::spi1::DR);
+            dr.write(|w| w.bits(0x55));
+        });
+        */
     }
 }

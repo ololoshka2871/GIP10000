@@ -96,7 +96,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 polarity: stm32f4xx_hal::spi::Polarity::IdleLow,
                 phase: stm32f4xx_hal::spi::Phase::CaptureOnFirstTransition,
             },
-            10.MHz(),
+            1.MHz(),
             &clocks,
         );
 

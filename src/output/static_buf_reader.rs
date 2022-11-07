@@ -4,7 +4,7 @@ pub struct StaticBufReader(pub &'static [u8]);
 
 impl StaticBufReader {
     pub fn empty() -> Self {
-        unsafe { StaticBufReader(core::slice::from_raw_parts(core::ptr::null(), 0)) }
+        unsafe { StaticBufReader(core::slice::from_raw_parts(0x01 as *const u8, 0)) }
     }
 }
 

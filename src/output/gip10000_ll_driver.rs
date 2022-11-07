@@ -12,7 +12,7 @@ use stm32f4xx_hal::{
 
 use super::{
     anodes_driver::AnodesDriver, catodes_selector::CatodesSelector, paralel_bus::ParalelBus,
-    serial_bus::SerialBus, static_buf_reader::StaticBufReader,
+    spi_bus::SPIBus, static_buf_reader::StaticBufReader,
 };
 
 const ROWS_BYTES: usize = 13; // 100 // 8 + 1
@@ -31,7 +31,7 @@ where
     SPIDEV: stm32f4xx_hal::spi::Instance,
 {
     catodes: CatodesSelector<u8, ParalelBus<u8>>,
-    anodes: AnodesDriver<SerialBus<SPIDEV, SPIPINS, DMA, S>, ALATCH>,
+    anodes: AnodesDriver<SPIBus<SPIDEV, SPIPINS, DMA, S>, ALATCH>,
     timer: CounterUs<TIM>,
 
     front_buffer: &'static mut [u8],
@@ -58,9 +58,13 @@ where
         a_latch: ALATCH,
         dma_ch: StreamX<DMA, S>,
     ) -> Self {
+        unsafe {
+            (&mut FRONT_BUFFER[..13]).copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        }
+
         Self {
             catodes: CatodesSelector::new(ParalelBus::new()),
-            anodes: AnodesDriver::new(SerialBus::new(spi, dma_ch), a_latch),
+            anodes: AnodesDriver::new(SPIBus::new(spi, dma_ch), a_latch),
             timer,
 
             front_buffer: unsafe { &mut FRONT_BUFFER },
@@ -92,7 +96,7 @@ where
         let col = self.catodes.select_column(self.col_counter);
 
         let from = col as usize * ROWS_BYTES;
-        let to = col as usize * (ROWS_BYTES + 1);
+        let to = (col as usize + 1) * ROWS_BYTES;
         let data = StaticBufReader::from(self.front_buffer[from..to].as_ptr_range());
         self.anodes.set_colum_pixels(data);
     }
