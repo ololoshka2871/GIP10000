@@ -1,5 +1,6 @@
 use core::convert::Infallible;
 
+use cortex_m::interrupt::InterruptNumber;
 use stm32f4xx_hal::{
     dma::{
         self,
@@ -21,7 +22,7 @@ const COLUMNS_COUNT: usize = 100;
 static mut FRONT_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 static mut BACK_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 
-pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8>
+pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8>
 where
     DMA: stm32f4xx_hal::dma::traits::Instance,
     StreamX<DMA, S>: StreamISR,
@@ -31,7 +32,7 @@ where
     SPIDEV: stm32f4xx_hal::spi::Instance,
 {
     catodes: CatodesSelector<u8, ParalelBus<u8>>,
-    anodes: AnodesDriver<SPIDEV, SPIPINS, DMA, ALATCH, S>,
+    anodes: AnodesDriver<SPIDEV, SPIPINS, DMA, ALATCH, I, S>,
     timer: CounterUs<TIM>,
 
     front_buffer: &'static mut [u8],
@@ -40,9 +41,10 @@ where
     col_counter: u8,
 }
 
-impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8>
-    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
+impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8>
+    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, S>
 where
+    I: InterruptNumber,
     DMA: stm32f4xx_hal::dma::traits::Instance,
     StreamX<DMA, S>: StreamISR,
     ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
@@ -55,6 +57,7 @@ where
     pub fn new(
         timer: CounterUs<TIM>,
         spi: Spi<SPIDEV, SPIPINS>,
+        spi_irq_n: I,
         a_latch: ALATCH,
         dma_ch: StreamX<DMA, S>,
     ) -> Self {
@@ -64,7 +67,7 @@ where
 
         Self {
             catodes: CatodesSelector::new(ParalelBus::new()),
-            anodes: AnodesDriver::new(spi, dma_ch, a_latch),
+            anodes: AnodesDriver::new(spi, dma_ch, a_latch, spi_irq_n),
             timer,
 
             front_buffer: unsafe { &mut FRONT_BUFFER },
@@ -109,24 +112,25 @@ where
         self.next_column()
     }
 
-    pub fn on_dma(&mut self) {
-        self.anodes.write_done();
-        self.catodes.disable();
+    pub fn on_spi_isr(&mut self) {
+        if self.anodes.on_spi_isr() {
+            self.catodes.disable();
 
-        let catodes = &self.catodes;
-        let col_counter = self.col_counter;
-        let col = self
-            .anodes
-            .latch_with(move || catodes.select_column(col_counter));
+            let catodes = &self.catodes;
+            let col_counter = self.col_counter;
+            let col = self
+                .anodes
+                .latch_with(move || catodes.select_column(col_counter));
 
-        self.catodes.enable_with(col);
+            self.catodes.enable_with(col);
 
-        self.col_counter = (self.col_counter + 1) % COLUMNS_COUNT as u8;
+            self.col_counter = (self.col_counter + 1) % COLUMNS_COUNT as u8;
+        }
     }
 }
 
-unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, const S: u8> Sync
-    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, S>
+unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8> Sync
+    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, S>
 where
     DMA: stm32f4xx_hal::dma::traits::Instance,
     StreamX<DMA, S>: StreamISR,

@@ -5,11 +5,10 @@ use alloc::sync::Arc;
 
 use cortex_m::interrupt::Mutex;
 use stm32f4xx_hal::dma::StreamsTuple;
-use stm32f4xx_hal::gpio::PA5;
 #[allow(unused_imports)]
 use stm32f4xx_hal::gpio::{
-    Alternate, Analog, Output, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA6, PA7, PA8, PB0, PC10,
-    PC13, PD10, PD11, PD13, PE12,
+    Alternate, Analog, Output, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA5, PA6, PA7, PA8, PB0,
+    PC10, PC13, PD10, PD11, PD13, PE12,
 };
 
 use stm32f4xx_hal::pac::{interrupt, DMA2, SPI1};
@@ -36,6 +35,7 @@ static DISPLAY: Mutex<
                 PA1<Output>,
                 TIM11,
                 DMA2,
+                IRQ,
                 3,
             >,
         >,
@@ -87,7 +87,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         ic.unpend(IRQ::TIM1_TRG_COM_TIM11.into());
         ic.unmask(IRQ::TIM1_TRG_COM_TIM11.into());
 
-        let spi1 = dp.SPI1.spi(
+        let mut spi1 = dp.SPI1.spi(
             (
                 gpioa.pa5.into_alternate(),
                 NoMiso {},
@@ -100,18 +100,19 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             8.MHz(),
             &clocks,
         );
-
-        let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
+        spi1.listen(stm32f4xx_hal::spi::Event::Txe);
         ic.set_priority(
-            IRQ::DMA2_STREAM3.into(),
+            IRQ::SPI1.into(),
             crate::config::UPDATE_COUNTER_INTERRUPT_PRIO,
         );
-        ic.unpend(IRQ::DMA2_STREAM3.into());
-        ic.unmask(IRQ::DMA2_STREAM3.into());
+        ic.unpend(IRQ::SPI1.into());
+        ic.unmask(IRQ::SPI1.into());
 
+        let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
         let gip10000 = Gip10000llDriver::new(
             timer,
             spi1,
+            IRQ::SPI1,
             gpioa
                 .pa1
                 .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::High),
@@ -235,11 +236,12 @@ unsafe fn TIM1_TRG_COM_TIM11() {
 
 #[cfg(feature = "stm32f401")]
 #[interrupt]
-unsafe fn DMA2_STREAM3() {
-    crate::support::led::led_set(1);
+unsafe fn SPI1() {
+    crate::support::led::led_toggle();
+
     cortex_m::interrupt::free(|cs| {
         if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
-            disp.on_dma();
+            disp.on_spi_isr();
         }
     })
 }

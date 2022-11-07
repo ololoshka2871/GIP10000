@@ -3,9 +3,9 @@
 use core::convert::Infallible;
 
 use alloc::boxed::Box;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::v2::StatefulOutputPin;
 
-struct MyPin(pub Box<dyn OutputPin<Error = Infallible>>);
+struct MyPin(pub Box<dyn StatefulOutputPin<Error = Infallible>>);
 
 unsafe impl Sync for MyPin {}
 
@@ -13,10 +13,17 @@ static mut LED: Option<MyPin> = None;
 
 pub fn led_init<P>(pin: P)
 where
-    P: OutputPin<Error = Infallible> + 'static,
+    P: StatefulOutputPin<Error = Infallible> + 'static,
 {
     unsafe {
         LED = Some(MyPin(Box::new(pin)));
+    }
+}
+
+pub fn led_toggle() {
+    if let Some(l) = unsafe { LED.as_mut() } {
+        let curr = l.0.is_set_low().unwrap();
+        let _ = if curr { l.0.set_high() } else { l.0.set_low() };
     }
 }
 
