@@ -3,17 +3,16 @@ use core::convert::Infallible;
 use cortex_m::interrupt::InterruptNumber;
 use stm32f4xx_hal::{
     dma::{
-        self,
         traits::{self, StreamISR},
         ChannelX, StreamX,
     },
     spi::Spi,
-    timer::{self, CounterUs},
+    timer::CounterUs,
 };
 
 use super::{
-    anodes_driver::AnodesDriver, catodes_selector::CatodesSelector, paralel_bus::ParalelBus,
-    static_buf_reader::StaticBufReader,
+    anodes_driver::AnodesDriver, catodes_selector::CatodesSelector,
+    static_buf_reader::StaticBufReader, Bus,
 };
 
 const ROWS_BYTES: usize = 13; // 100 // 8 + 1
@@ -22,7 +21,7 @@ const COLUMNS_COUNT: usize = 100;
 static mut FRONT_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 static mut BACK_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 
-pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8>
+pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, CB, const S: u8>
 where
     DMA: stm32f4xx_hal::dma::traits::Instance,
     StreamX<DMA, S>: StreamISR,
@@ -31,18 +30,18 @@ where
         traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
     SPIDEV: stm32f4xx_hal::spi::Instance,
 {
-    catodes: CatodesSelector<u8, ParalelBus<u8>>,
+    catodes: CatodesSelector<u16, CB, COLUMNS_COUNT>,
     anodes: AnodesDriver<SPIDEV, SPIPINS, DMA, ALATCH, I, S>,
     timer: CounterUs<TIM>,
 
     front_buffer: &'static mut [u8],
     back_buffer: &'static mut [u8],
 
-    col_counter: u8,
+    col_counter: u16,
 }
 
-impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8>
-    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, S>
+impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, CB, const S: u8>
+    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, CB, S>
 where
     I: InterruptNumber,
     DMA: stm32f4xx_hal::dma::traits::Instance,
@@ -53,6 +52,7 @@ where
     SPIDEV: stm32f4xx_hal::spi::Instance,
     ALATCH: embedded_hal::digital::v2::OutputPin<Error = Infallible>,
     TIM: stm32f4xx_hal::timer::Instance,
+    CB: Bus<u16>,
 {
     pub fn new(
         timer: CounterUs<TIM>,
@@ -60,13 +60,15 @@ where
         spi_irq_n: I,
         a_latch: ALATCH,
         dma_ch: StreamX<DMA, S>,
+        catodes_bus: CB,
+        pin_offsets: super::catodes_selector::Offsets<u16>,
     ) -> Self {
         unsafe {
             (&mut FRONT_BUFFER[..13]).copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
         }
 
         Self {
-            catodes: CatodesSelector::new(ParalelBus::new()),
+            catodes: CatodesSelector::new(catodes_bus, pin_offsets),
             anodes: AnodesDriver::new(spi, dma_ch, a_latch, spi_irq_n),
             timer,
 
@@ -122,15 +124,15 @@ where
                 .anodes
                 .latch_with(move || catodes.select_column(col_counter));
 
-            self.catodes.enable_with(col);
+            self.catodes.apply_column(col);
 
-            self.col_counter = (self.col_counter + 1) % COLUMNS_COUNT as u8;
+            self.col_counter = (self.col_counter + 1) % COLUMNS_COUNT as u16;
         }
     }
 }
 
-unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, const S: u8> Sync
-    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, S>
+unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, CB, const S: u8> Sync
+    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, I, CB, S>
 where
     DMA: stm32f4xx_hal::dma::traits::Instance,
     StreamX<DMA, S>: StreamISR,

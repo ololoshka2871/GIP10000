@@ -5,22 +5,28 @@ use alloc::sync::Arc;
 
 use cortex_m::interrupt::Mutex;
 use stm32f4xx_hal::dma::StreamsTuple;
+
 #[allow(unused_imports)]
 use stm32f4xx_hal::gpio::{
     Alternate, Analog, Output, Speed, PA0, PA1, PA11, PA12, PA2, PA3, PA5, PA6, PA7, PA8, PB0,
-    PC10, PC13, PD10, PD11, PD13, PE12,
+    PB12, PB13, PB3, PB4, PB5, PB6, PB7, PB8, PC10, PC13, PD10, PD11, PD13, PE12,
 };
 
-use stm32f4xx_hal::pac::{interrupt, DMA2, SPI1};
+use stm32f4xx_hal::pac::{interrupt, DMA2, GPIOB, SPI1};
 use stm32f4xx_hal::spi::NoMiso;
 use stm32f4xx_hal::{gpio::PushPull, pac::Interrupt as IRQ, pac::TIM11, prelude::*, time::Hertz};
 
+use crate::parralel_port;
 use crate::{
     output::Gip10000llDriver,
     support::{interrupt_controller::IInterruptController, InterruptController},
 };
 
 use super::WorkMode;
+
+parralel_port!(Catodes, GPIOB, gpiob::Parts, stm32f4xx_hal::pac::gpiob::RegisterBlock,
+    u16 => (pb3, pb4, pb5, pb6, pb7, pb8, pb12, pb13)
+);
 
 static DISPLAY: Mutex<
     RefCell<
@@ -36,6 +42,7 @@ static DISPLAY: Mutex<
                 TIM11,
                 DMA2,
                 IRQ,
+                Catodes,
                 3,
             >,
         >,
@@ -117,6 +124,17 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                 .pa1
                 .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::High),
             spi1_dma,
+            Catodes::init(dp.GPIOB), //ParalelBus::new(dp.GPIOB.split(), (3, 4, 5, 6, 7, 8, 12, 13)),
+            crate::output::Offsets {
+                oe1: Catodes::get_mask_for_pin(12),
+                oe2: Catodes::get_mask_for_pin(13),
+                a: Catodes::get_mask_for_pin(3),
+                b: Catodes::get_mask_for_pin(4),
+                c: Catodes::get_mask_for_pin(5),
+                d: Catodes::get_mask_for_pin(6),
+                e: Catodes::get_mask_for_pin(7),
+                f: Catodes::get_mask_for_pin(8),
+            },
         );
 
         cortex_m::interrupt::free(|cs| {
