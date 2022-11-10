@@ -52,9 +52,11 @@ where
     }
 
     pub fn set_colum_pixels(&mut self, pixels: StaticBufReader) {
+        self.transfer.clear_interrupts();
         self.transfer.next_transfer(pixels).unwrap();
         unsafe {
             cortex_m::peripheral::NVIC::unmask(self.irq_n);
+            self.second_isr = false;
         }
         /* триггерить на самом деле не надо, видимо то, что SPI готов к передаче - это флаг TXE и его достаточно для DMA
         self.transfer.start(|ch| unsafe {

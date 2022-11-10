@@ -94,7 +94,7 @@ where
 
     pub fn start(&mut self) {
         use stm32f4xx_hal::prelude::*;
-        self.timer.start(100.micros()).unwrap();
+        self.timer.start(1000.micros()).unwrap();
     }
 
     fn next_column(&mut self) {
@@ -116,6 +116,7 @@ where
 
     pub fn on_spi_isr(&mut self) {
         if self.anodes.on_spi_isr() {
+            crate::support::led::led_toggle();
             self.catodes.disable();
 
             let catodes = &self.catodes;
