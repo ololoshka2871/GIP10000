@@ -41,7 +41,6 @@ static DISPLAY: Mutex<
                 PA1<Output>,
                 TIM11,
                 DMA2,
-                IRQ,
                 Catodes,
                 3,
             >,
@@ -94,7 +93,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         ic.unpend(IRQ::TIM1_TRG_COM_TIM11.into());
         ic.unmask(IRQ::TIM1_TRG_COM_TIM11.into());
 
-        let mut spi1 = dp.SPI1.spi(
+        let spi1 = dp.SPI1.spi(
             (
                 gpioa.pa5.into_alternate(),
                 NoMiso {},
@@ -107,6 +106,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
             8.MHz(),
             &clocks,
         );
+        /*
         spi1.listen(stm32f4xx_hal::spi::Event::Txe);
         ic.set_priority(
             IRQ::SPI1.into(),
@@ -114,12 +114,19 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         );
         ic.unpend(IRQ::SPI1.into());
         ic.unmask(IRQ::SPI1.into());
+        */
 
         let spi1_dma = StreamsTuple::new(dp.DMA2).3; // SPI1_TX
+        ic.set_priority(
+            IRQ::DMA2_STREAM3.into(),
+            crate::config::UPDATE_COUNTER_INTERRUPT_PRIO,
+        );
+        ic.unpend(IRQ::DMA2_STREAM3.into());
+        ic.unmask(IRQ::DMA2_STREAM3.into());
+
         let gip10000 = Gip10000llDriver::new(
             timer,
             spi1,
-            IRQ::SPI1,
             gpioa
                 .pa1
                 .into_push_pull_output_in_state(stm32f4xx_hal::gpio::PinState::High),
@@ -252,6 +259,7 @@ unsafe fn TIM1_TRG_COM_TIM11() {
     })
 }
 
+/*
 #[cfg(feature = "stm32f401")]
 #[interrupt]
 unsafe fn SPI1() {
@@ -259,7 +267,18 @@ unsafe fn SPI1() {
 
     cortex_m::interrupt::free(|cs| {
         if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
-            disp.on_spi_isr();
+            disp.on_spi_done();
+        }
+    })
+}
+*/
+
+#[cfg(feature = "stm32f401")]
+#[interrupt]
+unsafe fn DMA2_STREAM3() {
+    cortex_m::interrupt::free(|cs| {
+        if let Some(ref mut disp) = DISPLAY.borrow(cs).borrow_mut().deref_mut() {
+            disp.on_spi_done();
         }
     })
 }
