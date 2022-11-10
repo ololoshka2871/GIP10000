@@ -61,7 +61,10 @@ where
         pin_offsets: super::catodes_selector::Offsets<u16>,
     ) -> Self {
         unsafe {
-            (&mut FRONT_BUFFER[..13]).copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+            FRONT_BUFFER
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, p)| *p = i as u8);
         }
 
         Self {

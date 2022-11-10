@@ -47,21 +47,43 @@ where
     // OE2 - нечетные
     // На схеме катоды протумерованы с 1, так что первый (нулевой) катод включается через OE2
     pub fn apply_column(&mut self, col: u16) {
-        let v = if col.is_even() {
-            let oe = self.offsets.oe2;
-            let abc = (col >> 1) & 0b111_u16;
-            let def = (col >> (1 + 3)) & 0b111_u16;
-
-            def | abc | oe
+        let (c, oe) = if col.is_even() {
+            (col, self.offsets.oe2)
         } else {
-            let oe = self.offsets.oe1;
-            let rev_col = C as u16 - col;
-            let abc = (rev_col >> 1) & 0b111_u16;
-            let def = (rev_col >> (1 + 3)) & 0b111_u16;
-
-            def | abc | oe
+            (C as u16 - col, self.offsets.oe1)
         };
 
-        self.bus.write(v)
+        let abc = self.to_abc((c >> 1) & 0b111_u16);
+        let def = self.to_def((c >> (1 + 3)) & 0b111_u16);
+
+        self.bus.write(def | abc | oe)
+    }
+
+    fn to_abc(&self, bits: u16) -> u16 {
+        let mut res = 0;
+        if bits & (1 << 0) != 0 {
+            res |= self.offsets.a;
+        }
+        if bits & (1 << 1) != 0 {
+            res |= self.offsets.b;
+        }
+        if bits & (1 << 2) != 0 {
+            res |= self.offsets.c;
+        }
+        res
+    }
+
+    fn to_def(&self, bits: u16) -> u16 {
+        let mut res = 0;
+        if bits & (1 << 0) != 0 {
+            res |= self.offsets.d;
+        }
+        if bits & (1 << 1) != 0 {
+            res |= self.offsets.e;
+        }
+        if bits & (1 << 2) != 0 {
+            res |= self.offsets.f;
+        }
+        res
     }
 }
