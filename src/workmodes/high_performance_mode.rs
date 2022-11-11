@@ -202,14 +202,13 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
         {
             let serial = Usbd::serial_port();
             let data_input_server = {
-                defmt::trace!("Creating G-Code server thread...");
+                defmt::trace!("Creating Input server thread...");
                 freertos_rust::Task::new()
-                    .name("G-Code")
+                    .name("Input")
                     .stack_size(
-                        (crate::config::G_CODE_TASK_STACK_SIZE / core::mem::size_of::<u32>())
-                            as u16,
+                        (crate::config::INPUT_TASK_STACK_SIZE / core::mem::size_of::<u32>()) as u16,
                     )
-                    .priority(TaskPriority(crate::config::GCODE_TASK_PRIO))
+                    .priority(TaskPriority(crate::config::INPUT_TASK_PRIO))
                     .start(move |_| {
                         crate::threads::data_input_server::gcode_server(
                             serial, /*, gcode_queue, req_queue*/

@@ -15,7 +15,7 @@ use stm32f4xx_hal::{
 };
 
 use usb_device::{class_prelude::UsbBusAllocator, prelude::*};
-use usbd_serial::SerialPort;
+use usbd_serial::CdcAcmClass;
 
 use crate::support::{self};
 
@@ -38,8 +38,8 @@ pub struct Usbd {
     interrupt_controller: Arc<dyn support::interrupt_controller::IInterruptController>,
     interrupt_prio: u8,
 
-    serial: Option<SerialPort<'static, UsbBus<USB>>>,
-    serial_port: Option<Arc<Mutex<&'static mut SerialPort<'static, UsbBus<USB>>>>>,
+    serial: Option<CdcAcmClass<'static, UsbBus<USB>>>,
+    serial_port: Option<Arc<Mutex<&'static mut CdcAcmClass<'static, UsbBus<USB>>>>>,
     subscribers: Vec<Task>,
 }
 
@@ -85,12 +85,12 @@ impl Usbd {
         unsafe { USBD.as_mut().expect("Call Usbd::init() first!") }
     }
 
-    pub fn serial_port() -> Arc<Mutex<&'static mut SerialPort<'static, UsbBus<USB>>>> {
+    pub fn serial_port() -> Arc<Mutex<&'static mut CdcAcmClass<'static, UsbBus<USB>>>> {
         let mut _self = Self::get_static_self();
 
         if _self.serial_port.is_none() {
             defmt::info!("Allocating ACM device");
-            _self.serial = Some(SerialPort::new(&_self.usb_bus));
+            _self.serial = Some(CdcAcmClass::new(&_self.usb_bus, 64));
 
             _self.serial_port = Some(Arc::new(
                 Mutex::new(_self.serial.as_mut().unwrap())

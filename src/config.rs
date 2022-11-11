@@ -33,13 +33,13 @@ pub const UPDATE_COUNTER_INTERRUPT_PRIO: u8 = IRQ_HIGEST_PRIO + 6;
 pub const IDLE_TASK_PRIO: u8 = 0;
 
 /// usbd task prio
-pub const USBD_TASK_PRIO: u8 = IDLE_TASK_PRIO + 3;
+pub const USBD_TASK_PRIO: u8 = IDLE_TASK_PRIO + 2;
 
 /// monitor task prio
 pub const MONITOR_TASK_PRIO: u8 = IDLE_TASK_PRIO + 1;
 
 /// input reader task prio
-pub const GCODE_TASK_PRIO: u8 = IDLE_TASK_PRIO + 2;
+pub const INPUT_TASK_PRIO: u8 = IDLE_TASK_PRIO + 3;
 
 //-----------------------------------------------------------------------------
 
@@ -47,7 +47,7 @@ pub const GCODE_TASK_PRIO: u8 = IDLE_TASK_PRIO + 2;
 pub const MONITOR_TASK_STACK_SIZE: usize = 2048 + 2048;
 
 /// input reader stack size
-pub const G_CODE_TASK_STACK_SIZE: usize = 2048;
+pub const INPUT_TASK_STACK_SIZE: usize = 2048;
 
 /// usb thread stack size
 pub const USBD_TASK_STACK_SIZE: usize = 4092;
