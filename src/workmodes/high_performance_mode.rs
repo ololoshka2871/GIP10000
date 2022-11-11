@@ -210,9 +210,7 @@ impl WorkMode<HighPerformanceMode> for HighPerformanceMode {
                     )
                     .priority(TaskPriority(crate::config::INPUT_TASK_PRIO))
                     .start(move |_| {
-                        crate::threads::data_input_server::gcode_server(
-                            serial, /*, gcode_queue, req_queue*/
-                        )
+                        crate::threads::data_input_server::gcode_server(serial, &DISPLAY)
                     })
                     .expect("expect5")
             };
