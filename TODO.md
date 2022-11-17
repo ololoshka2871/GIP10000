@@ -16,3 +16,6 @@
     [_] Совместимость с display-interface во стороны ПК
     [v] Dufusion defiring
     [_] Linux core framebuffer driver
+
+[_] Переезд на F074C8/RTIC
+

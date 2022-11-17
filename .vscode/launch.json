@@ -11,10 +11,10 @@
             "name": "cortex-debug (Debug)",
             "type": "cortex-debug",
             "cwd": "${workspaceRoot}",
-            "executable": "target/thumbv7em-none-eabihf/debug/gip10000", // бинарь
+            "executable": "target/thumbv6m-none-eabi/debug/gip10000", // бинарь
             "request": "attach", // позволяет не прошивать таргет при запуске
             "loadFiles": false, 
-            "svdFile": "${workspaceRoot}/STM32F401.svd",
+            "svdFile": "${workspaceRoot}/STM32F072x.svd",
             "servertype": "external", // Подключиться к внешнему отладочному интерфейсу
             "gdbTarget": "localhost:2331", // адрес куда подключаться
             "postAttachCommands": [
@@ -28,10 +28,10 @@
             "name": "cortex-debug (Release)",
             "type": "cortex-debug",
             "cwd": "${workspaceRoot}",
-            "executable": "target/thumbv7em-none-eabihf/release/gip10000", // бинарь
+            "executable": "target/thumbv7m-none-eabi/release/gip10000", // бинарь
             "request": "attach", // позволяет не прошивать таргет при запуске
             "loadFiles": false, 
-            "svdFile": "${workspaceRoot}/STM32F401.svd",
+            "svdFile": "${workspaceRoot}/STM32F072x.svd",
             "servertype": "external", // Подключиться к внешнему отладочному интерфейсу
             "gdbTarget": "localhost:2331", // адрес куда подключаться
             "postAttachCommands": [
@@ -46,10 +46,10 @@
             "name": "cortex-debug (Debug) Remote",
             "type": "cortex-debug",
             "cwd": "${workspaceRoot}",
-            "executable": "target/thumbv7em-none-eabihf/debug/gip10000", // бинарь
+            "executable": "target/thumbv6m-none-eabi/debug/gip10000", // бинарь
             "request": "attach", // позволяет не прошивать таргет при запуске
             "loadFiles": false, 
-            "svdFile": "${workspaceRoot}/STM32F401.svd",
+            "svdFile": "${workspaceRoot}/STM32F072x.svd",
             "servertype": "external", // Подключиться к внешнему отладочному интерфейсу
             "gdbTarget": "192.168.1.95:2331", // адрес куда подключаться
             "postAttachCommands": [

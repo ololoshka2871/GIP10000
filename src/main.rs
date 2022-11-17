@@ -1,80 +1,71 @@
-#![no_std]
 #![no_main]
-// For allocator
-#![feature(lang_items)]
-#![feature(alloc_error_handler)]
-#![allow(incomplete_features)]
-#![feature(adt_const_params)]
-#![feature(slice_from_ptr_range)]
-
-extern crate alloc;
-
-//mod main_data_storage;
-//mod protobuf;
-//mod sensors;
-//mod settings;
-mod output;
-mod support;
-mod threads;
-mod time_base;
-mod workmodes;
-
-pub mod config;
-//pub mod config_pins;
-
-#[cfg(debug_assertions)]
-mod master_value_stat;
-
-use cortex_m_rt::entry;
-
-use stm32f4xx_hal::pac;
+#![no_std]
 
 use panic_abort as _;
+use rtic::app;
 
-use crate::{
-    support::free_rtos_error_ext::FreeRtosErrorContainer,
-    workmodes::high_performance_mode::HighPerformanceMode,
-};
-use workmodes::WorkMode;
+use stm32f0xx_hal::gpio::{gpioa::PA0, Output, PushPull};
+use stm32f0xx_hal::prelude::*;
+use systick_monotonic::{fugit::Duration, Systick};
 
-//---------------------------------------------------------------
+#[app(device = stm32f0xx_hal::pac, peripherals = true, dispatchers = [ADC_COMP])]
+mod app {
+    use super::*;
 
-#[global_allocator]
-static GLOBAL: freertos_rust::FreeRtosAllocator = freertos_rust::FreeRtosAllocator;
+    #[shared]
+    struct Shared {}
 
-//---------------------------------------------------------------
+    #[local]
+    struct Local {
+        led: PA0<Output<PushPull>>,
+        state: bool,
+    }
 
-#[entry]
-fn main() -> ! {
-    // #[cfg(debug_assertions)]
-    // cortex_m::asm::bkpt();
+    #[monotonic(binds = SysTick, default = true)]
+    type MonoTimer = Systick<1000>;
 
-    defmt::trace!("++ Start up! ++");
+    #[init]
+    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
+        let (led, mono) = cortex_m::interrupt::free(move |cs| {
+            // Setup clocks
+            let mut flash = cx.device.FLASH;
+            let mut rcc = cx
+                .device
+                .RCC
+                .configure()
+                .hsi48()
+                .enable_crs(cx.device.CRS)
+                .sysclk(48.mhz())
+                .freeze(&mut flash);
 
-    let p = unsafe { cortex_m::Peripherals::take().unwrap_unchecked() };
-    let dp = unsafe { pac::Peripherals::take().unwrap_unchecked() };
+            let mono = Systick::new(cx.core.SYST, rcc.clocks.sysclk().0);
 
-    start_at_mode::<HighPerformanceMode>(p, dp)
-        .unwrap_or_else(|e| defmt::panic!("Failed to start thread: {}", FreeRtosErrorContainer(e)));
+            // Setup LED
+            let gpioa = cx.device.GPIOA.split(&mut rcc);
+            let led = gpioa.pa0.into_push_pull_output(cs);
 
-    freertos_rust::FreeRtosUtils::start_scheduler();
+            // Schedule the blinking task
+            blink::spawn_after(Duration::<u64, 1, 1000>::from_ticks(1000)).unwrap();
+
+            (led, mono)
+        });
+
+        (
+            Shared {},
+            Local { led, state: false },
+            init::Monotonics(mono),
+        )
+    }
+
+    #[task(local = [led, state])]
+    fn blink(cx: blink::Context) {
+        if *cx.local.state {
+            let _ = cx.local.led.set_high();
+            *cx.local.state = false;
+        } else {
+            let _ = cx.local.led.set_low();
+            *cx.local.state = true;
+        }
+        blink::spawn_after(Duration::<u64, 1, 1000>::from_ticks(1000)).unwrap();
+    }
 }
-
-fn start_at_mode<T>(
-    p: cortex_m::Peripherals,
-    dp: pac::Peripherals,
-) -> Result<(), freertos_rust::FreeRtosError>
-where
-    T: WorkMode<T>,
-{
-    let mut mode = T::new(p, dp);
-    mode.configure_clock();
-    mode.print_clock_config();
-
-    #[cfg(debug_assertions)]
-    master_value_stat::init_master_getter(time_base::master_counter::MasterCounter::acquire());
-
-    mode.start_threads()
-}
-
-//-----------------------------------------------------------------------------
