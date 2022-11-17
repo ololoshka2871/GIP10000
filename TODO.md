@@ -18,4 +18,5 @@
     [_] Linux core framebuffer driver
 
 [_] Переезд на F074C8/RTIC
-
+    [v] minimal example
+    [v] usb serial ACM
