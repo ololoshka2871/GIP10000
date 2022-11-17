@@ -4,68 +4,90 @@
 use panic_abort as _;
 use rtic::app;
 
-use stm32f0xx_hal::gpio::{gpioa::PA0, Output, PushPull};
 use stm32f0xx_hal::prelude::*;
-use systick_monotonic::{fugit::Duration, Systick};
+use stm32f0xx_hal::usb::{Peripheral, UsbBusType};
+
+use systick_monotonic::Systick;
+
+use stm32_usbd::UsbBus;
+use usb_device::class_prelude::*;
+use usb_device::prelude::*;
+
+use usbd_serial::SerialPort;
 
 #[app(device = stm32f0xx_hal::pac, peripherals = true, dispatchers = [ADC_COMP])]
 mod app {
     use super::*;
 
     #[shared]
-    struct Shared {}
+    struct Shared {
+        usb_device: UsbDevice<'static, UsbBusType>,
+        serial: SerialPort<'static, UsbBus<Peripheral>>,
+    }
 
     #[local]
-    struct Local {
-        led: PA0<Output<PushPull>>,
-        state: bool,
-    }
+    struct Local {}
 
     #[monotonic(binds = SysTick, default = true)]
     type MonoTimer = Systick<1000>;
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
-        let (led, mono) = cortex_m::interrupt::free(move |cs| {
-            // Setup clocks
-            let mut flash = cx.device.FLASH;
-            let mut rcc = cx
-                .device
-                .RCC
-                .configure()
-                .hsi48()
-                .enable_crs(cx.device.CRS)
-                .sysclk(48.mhz())
-                .freeze(&mut flash);
+        static mut USB_BUS: Option<UsbBusAllocator<UsbBusType>> = None;
 
-            let mono = Systick::new(cx.core.SYST, rcc.clocks.sysclk().0);
+        let mut flash = cx.device.FLASH;
+        let mut rcc = cx
+            .device
+            .RCC
+            .configure()
+            .hsi48()
+            .enable_crs(cx.device.CRS)
+            .sysclk(48.mhz())
+            .freeze(&mut flash);
 
-            // Setup LED
-            let gpioa = cx.device.GPIOA.split(&mut rcc);
-            let led = gpioa.pa0.into_push_pull_output(cs);
+        let mono = Systick::new(cx.core.SYST, rcc.clocks.sysclk().0);
 
-            // Schedule the blinking task
-            blink::spawn_after(Duration::<u64, 1, 1000>::from_ticks(1000)).unwrap();
+        let gpioa = cx.device.GPIOA.split(&mut rcc);
 
-            (led, mono)
-        });
+        // usb
+        let usb = stm32f0xx_hal::usb::Peripheral {
+            usb: cx.device.USB,
+            pin_dm: gpioa.pa11,
+            pin_dp: gpioa.pa12,
+        };
+
+        unsafe { USB_BUS = Some(stm32_usbd::UsbBus::new(usb)) };
+
+        let serial = SerialPort::new(unsafe { USB_BUS.as_ref().unwrap_unchecked() });
+
+        let usb_dev = UsbDeviceBuilder::new(
+            unsafe { USB_BUS.as_ref().unwrap_unchecked() },
+            usb_device::prelude::UsbVidPid(0x16c0, 0x27dd),
+        )
+        .manufacturer("Mksoft")
+        .product("gip10000")
+        .serial_number("0")
+        .device_class(usbd_serial::USB_CLASS_CDC)
+        .build();
 
         (
-            Shared {},
-            Local { led, state: false },
+            Shared {
+                usb_device: usb_dev,
+                serial,
+            },
+            Local {},
             init::Monotonics(mono),
         )
     }
 
-    #[task(local = [led, state])]
-    fn blink(cx: blink::Context) {
-        if *cx.local.state {
-            let _ = cx.local.led.set_high();
-            *cx.local.state = false;
-        } else {
-            let _ = cx.local.led.set_low();
-            *cx.local.state = true;
-        }
-        blink::spawn_after(Duration::<u64, 1, 1000>::from_ticks(1000)).unwrap();
+    #[task(binds = USB, shared = [usb_device, serial])]
+    fn usb_handler(ctx: usb_handler::Context) {
+        let usb_device = ctx.shared.usb_device;
+        let serial = ctx.shared.serial;
+
+        (usb_device, serial).lock(|usb_device, serial| {
+            // USB dev poll only in the interrupt handler
+            usb_device.poll(&mut [serial]);
+        });
     }
 }

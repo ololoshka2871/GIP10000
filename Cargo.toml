@@ -29,7 +29,7 @@ usbd-serial = { path = "lib/usbd-serial" }
 
 panic-abort = "0.3"
 
-stm32f0xx-hal = { version = "0.18.0", features = ["rt"] }
+stm32f0xx-hal = { version = "0.18.0", features = ["rt"], optional = true }
 
 cortex-m-rtic = { version = "1.1" }
 systick-monotonic = "1.0.1"
@@ -40,7 +40,7 @@ opt-level = "z"
 [profile.dev]
 codegen-units = 1 # better optimizations
 panic = "abort"
-lto = true
+#lto = true
 # Если не влезает
 opt-level = "z"
 
@@ -56,4 +56,4 @@ default = [
   "stm32f072",
 ]
 
-stm32f072 = ["stm32f0xx-hal/stm32f072"] #, "stm32f4xx-hal/usb_fs"]
+stm32f072 = ["stm32f0xx-hal/stm32f072", "stm32f0xx-hal/stm32-usbd"]
