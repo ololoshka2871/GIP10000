@@ -1,17 +1,18 @@
 [_] USB
     [v] Serial echo server
-    [_] Bulk
+    [x] Bulk
+    [v] CDCAcm pocket oriented
 
-[_] GIP10000 driver
-    [_] connections
-    [_] Memory model
-    [_] Anodes driver
-    [_] Catodes selector
+[v] GIP10000 driver
+    [v] connections
+    [v] Memory model
+    [v] Anodes driver
+    [v] Catodes selector
     [_] Равномерное обновление экрана, а не по порядку столбцов
     [_] Совместимость с display-interface
 
-[_] USB display
-    [_] Запись в framebuffer через USB bulk transfer
+[v] USB display
+    [v] Запись в framebuffer через USB bulk transfer
     [_] Совместимость с display-interface во стороны ПК
-    [_] Dufusion defiring
+    [v] Dufusion defiring
     [_] Linux core framebuffer driver
