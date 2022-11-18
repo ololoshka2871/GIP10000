@@ -1,5 +1,7 @@
 use core::convert::Infallible;
 
+use embedded_hal::digital::v2::OutputPin;
+
 use super::{
     anodes_driver::AnodesDriver, catodes_selector::CatodesSelector,
     static_buf_reader::StaticBufReader, Bus,
@@ -8,6 +10,7 @@ use super::{
 pub trait BackBufWriter {
     const COMMIT_MAGICK: u16 = u16::MAX;
 
+    fn get_commit_magick(&self) -> u16;
     fn write(&mut self, offset: usize, data: &[u8]);
     fn commit(&mut self);
 }
@@ -18,18 +21,13 @@ const COLUMNS_COUNT: usize = 100;
 static mut FRONT_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 static mut BACK_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 
-pub struct Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, const S: u8>
+pub struct Gip10000llDriver<SPIDMA, DMA, LATCH, CB>
 where
-    DMA: stm32f0xx_hal_dma::dma::traits::Instance,
-    StreamX<DMA, S>: StreamISR,
-    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
-    stm32f4xx_hal::spi::Tx<SPIDEV>:
-        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
-    SPIDEV: stm32f4xx_hal::spi::Instance,
+    CB: Bus<u16>,
+    SPIDMA: crate::support::IDMASpi,
 {
     catodes: CatodesSelector<u16, CB, COLUMNS_COUNT>,
-    anodes: AnodesDriver<SPIDEV, SPIPINS, DMA, ALATCH, S>,
-    timer: CounterUs<TIM>,
+    anodes: AnodesDriver<SPIDMA, DMA, LATCH>,
 
     front_buffer: &'static mut [u8],
     back_buffer: &'static mut [u8],
@@ -37,24 +35,17 @@ where
     col_counter: u16,
 }
 
-impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, const S: u8>
-    Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, S>
+impl<SPIDMA, ALATCH, DMA, CB> Gip10000llDriver<SPIDMA, DMA, ALATCH, CB>
 where
-    DMA: stm32f4xx_hal::dma::traits::Instance,
-    StreamX<DMA, S>: StreamISR,
-    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
-    stm32f4xx_hal::spi::Tx<SPIDEV>:
-        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
-    SPIDEV: stm32f4xx_hal::spi::Instance,
-    ALATCH: embedded_hal::digital::v2::OutputPin<Error = Infallible>,
-    TIM: stm32f4xx_hal::timer::Instance,
+    SPIDMA: crate::support::IDMASpi,
+    ALATCH: OutputPin<Error = Infallible>,
+    DMA: crate::support::ISPITxDmaChannel,
     CB: Bus<u16>,
 {
     pub fn new(
-        timer: CounterUs<TIM>,
-        spi: Spi<SPIDEV, SPIPINS>,
+        spi: SPIDMA,
         a_latch: ALATCH,
-        dma_ch: StreamX<DMA, S>,
+        dma: DMA,
         catodes_bus: CB,
         pin_offsets: super::catodes_selector::Offsets<u16>,
     ) -> Self {
@@ -67,8 +58,7 @@ where
 
         Self {
             catodes: CatodesSelector::new(catodes_bus, pin_offsets),
-            anodes: AnodesDriver::new(spi, dma_ch, a_latch),
-            timer,
+            anodes: AnodesDriver::new(spi, dma, a_latch),
 
             front_buffer: unsafe { &mut FRONT_BUFFER },
             back_buffer: unsafe { &mut BACK_BUFFER },
@@ -78,16 +68,12 @@ where
     }
 
     pub fn swap_buffers(&mut self) {
-        let _ = freertos_rust::CriticalRegion::enter();
-        core::mem::swap(&mut self.front_buffer, &mut self.back_buffer);
+        cortex_m::interrupt::free(|_| {
+            core::mem::swap(&mut self.front_buffer, &mut self.back_buffer);
+        });
     }
 
-    pub fn start(&mut self) {
-        use stm32f4xx_hal::prelude::*;
-        self.timer.start(1000.micros()).unwrap();
-    }
-
-    fn next_column(&mut self) {
+    pub fn next_column(&mut self) {
         let col = self.catodes.select_column(self.col_counter);
 
         let from = col as usize * ROWS_BYTES;
@@ -96,17 +82,8 @@ where
         self.anodes.set_colum_pixels(data);
     }
 
-    pub fn on_timer(&mut self) {
-        use stm32f4xx_hal::timer::Event;
-
-        self.timer.clear_interrupt(Event::Update);
-
-        self.next_column()
-    }
-
-    pub fn on_spi_done(&mut self) {
+    pub fn column_writen(&mut self) {
         self.anodes.on_spi_done();
-        crate::support::led::led_toggle();
         self.catodes.disable();
 
         let catodes = &self.catodes;
@@ -121,17 +98,11 @@ where
     }
 }
 
-impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, const S: u8> BackBufWriter
-    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, S>
+impl<SPIDMA, ALATCH, DMA, CB> BackBufWriter for Gip10000llDriver<SPIDMA, DMA, ALATCH, CB>
 where
-    DMA: stm32f4xx_hal::dma::traits::Instance,
-    StreamX<DMA, S>: StreamISR,
-    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
-    stm32f4xx_hal::spi::Tx<SPIDEV>:
-        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
-    SPIDEV: stm32f4xx_hal::spi::Instance,
-    ALATCH: embedded_hal::digital::v2::OutputPin<Error = Infallible>,
-    TIM: stm32f4xx_hal::timer::Instance,
+    SPIDMA: crate::support::IDMASpi,
+    ALATCH: OutputPin<Error = Infallible>,
+    DMA: crate::support::ISPITxDmaChannel,
     CB: Bus<u16>,
 {
     fn write(&mut self, offset: usize, data: &[u8]) {
@@ -145,16 +116,8 @@ where
     fn commit(&mut self) {
         self.swap_buffers()
     }
-}
 
-unsafe impl<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, const S: u8> Sync
-    for Gip10000llDriver<SPIDEV, SPIPINS, ALATCH, TIM, DMA, CB, S>
-where
-    DMA: stm32f4xx_hal::dma::traits::Instance,
-    StreamX<DMA, S>: StreamISR,
-    ChannelX<S>: stm32f4xx_hal::dma::traits::Channel,
-    stm32f4xx_hal::spi::Tx<SPIDEV>:
-        traits::DMASet<StreamX<DMA, S>, S, stm32f4xx_hal::dma::MemoryToPeripheral>,
-    SPIDEV: stm32f4xx_hal::spi::Instance,
-{
+    fn get_commit_magick(&self) -> u16 {
+        Self::COMMIT_MAGICK
+    }
 }

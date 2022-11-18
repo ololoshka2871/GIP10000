@@ -11,7 +11,7 @@ pub struct AnodesDriver<SPIDMA, DMA, LATCH>
 where
     SPIDMA: crate::support::IDMASpi,
 {
-    spi: SPIDMA,
+    _spi: SPIDMA,
     dma: DMA,
     latch: LATCH,
 }
@@ -31,7 +31,11 @@ where
 
         spi.enable_dma_event();
 
-        Self { spi, dma, latch }
+        Self {
+            _spi: spi,
+            dma,
+            latch,
+        }
     }
 
     pub fn set_colum_pixels(&mut self, pixels: StaticBufReader) {

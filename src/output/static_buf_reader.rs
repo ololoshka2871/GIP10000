@@ -3,6 +3,7 @@ use core::ops::Range;
 pub struct StaticBufReader(pub &'static [u8]);
 
 impl StaticBufReader {
+    #[allow(unused)]
     pub fn empty() -> Self {
         unsafe { StaticBufReader(core::slice::from_raw_parts(0x01 as *const u8, 0)) }
     }

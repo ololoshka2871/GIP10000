@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! parralel_port {
     ($name: ident, $port: ty, $parts: ty, $regs: ty, $valuetype:ty => ($([$pin:ident: $bit_n:expr]),+)) => {
-        struct $name{
+        pub struct $name{
             regs_ptr: usize,
             mask: $valuetype,
         }
