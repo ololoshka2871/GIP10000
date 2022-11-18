@@ -16,7 +16,7 @@ pub trait BackBufWriter {
 }
 
 const ROWS_BYTES: usize = 13; // 100 // 8 + 1
-const COLUMNS_COUNT: usize = 100;
+pub const COLUMNS_COUNT: usize = 100;
 
 static mut FRONT_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
 static mut BACK_BUFFER: [u8; ROWS_BYTES * COLUMNS_COUNT] = [0u8; ROWS_BYTES * COLUMNS_COUNT];
@@ -82,8 +82,11 @@ where
         self.anodes.set_colum_pixels(data);
     }
 
-    pub fn column_writen(&mut self) {
+    pub fn column_data_writen(&mut self) {
         self.anodes.on_spi_done();
+    }
+
+    pub fn apply_new_column(&mut self) {
         self.catodes.disable();
 
         let catodes = &self.catodes;

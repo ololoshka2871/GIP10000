@@ -17,6 +17,7 @@
     [v] Dufusion defiring
     [_] Linux core framebuffer driver
 
-[_] Переезд на F074C8/RTIC
+[v] Переезд на F074C8/RTIC
     [v] minimal example
     [v] usb serial ACM
+    [_] Выбор катода

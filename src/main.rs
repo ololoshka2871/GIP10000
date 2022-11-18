@@ -16,8 +16,6 @@ use stm32f0xx_hal::prelude::*;
 use stm32f0xx_hal::spi::{self, EightBit, Spi};
 use stm32f0xx_hal::usb::{Peripheral, UsbBusType};
 
-use stm32f0xx_hal::stm32f0::stm32f0x2::Interrupt as IRQ;
-
 use stm32f0xx_hal_dma::dma::{dma1::C3, DmaExt};
 
 use systick_monotonic::Systick;
@@ -28,9 +26,14 @@ use usb_device::prelude::*;
 
 use usbd_serial::CdcAcmClass;
 
-use support::{DMASpi, IInterruptController, InterruptController, SPITxDmaChannel};
+use support::{DMASpi, SPITxDmaChannel};
 
 const CDC_POCKET_SIZE: u16 = 64;
+
+const SPI_CLOCK_MHZ: u32 = 1;
+const FPS: u32 = 30;
+const COLUMN_TICK_RATE_HZ: u32 = crate::output::COLUMNS_COUNT as u32 * FPS;
+const POST_DMA_DELAY_HZ: u32 = 7500; // Подбирается экспериментально, чтобы latch был после SPI посылки
 
 parralel_port!(Catodes, GPIOB, gpiob::Parts, gpiof::RegisterBlock,
     u16 => ([pb3: 3], [pb4: 4], [pb5: 5], [pb6: 6], [pb7: 7], [pb8: 8], [pb12: 12], [pb13: 13])
@@ -38,8 +41,6 @@ parralel_port!(Catodes, GPIOB, gpiob::Parts, gpiof::RegisterBlock,
 
 #[app(device = stm32f0xx_hal::pac, peripherals = true, dispatchers = [ADC_COMP])]
 mod app {
-    use stm32f0xx_hal::timers::Event;
-
     use super::*;
 
     #[shared]
@@ -50,8 +51,6 @@ mod app {
             PA1<Output<PushPull>>,
             Catodes,
         >,
-
-        ic: InterruptController,
     }
 
     #[local]
@@ -84,7 +83,7 @@ mod app {
 
         let gpioa = cx.device.GPIOA.split(&mut rcc);
 
-        let (sck, miso, mosi, pin_dm, pin_dp, latch) = cortex_m::interrupt::free(|cs| {
+        let (sck, miso, mosi, pin_dm, pin_dp, mut latch) = cortex_m::interrupt::free(|cs| {
             (
                 gpioa.pa5.into_alternate_af0(cs),
                 gpioa.pa6.into_alternate_af0(cs),
@@ -121,22 +120,32 @@ mod app {
 
         //---------------------------------------------------------------------
 
-        let spi1 = Spi::spi1(
+        let mut spi1 = Spi::spi1(
             cx.device.SPI1,
             (sck, miso, mosi),
             spi::Mode {
                 polarity: spi::Polarity::IdleLow,
                 phase: spi::Phase::CaptureOnFirstTransition,
             },
-            1.mhz(), // fixme!
+            SPI_CLOCK_MHZ.mhz(),
             &mut rcc,
         );
+
+        {
+            // force reset anodes
+            let _ = spi1.write(&[0u8; 16]);
+            let _ = latch.set_high();
+            let _ = latch.set_low();
+        }
 
         let mut spi1_dma = cx.device.DMA1.split(&mut rcc).3; // SPI1_TX
         spi1_dma.listen(stm32f0xx_hal_dma::dma::Event::TransferComplete);
 
-        let mut col_timer =
-            stm32f0xx_hal::timers::Timer::tim17(cx.device.TIM17, (100 * 30).hz(), &mut rcc);
+        let mut col_timer = stm32f0xx_hal::timers::Timer::tim17(
+            cx.device.TIM17,
+            COLUMN_TICK_RATE_HZ.hz(),
+            &mut rcc,
+        );
 
         col_timer.listen(stm32f0xx_hal::timers::Event::TimeOut);
 
@@ -158,11 +167,7 @@ mod app {
         );
 
         (
-            Shared {
-                ic: InterruptController::new(cx.core.NVIC),
-                gip10k,
-                //anodes,
-            },
+            Shared { gip10k },
             Local {
                 usb_device: usb_dev,
                 serial,
@@ -174,7 +179,7 @@ mod app {
 
     //-------------------------------------------------------------------------
 
-    #[task(binds = USB, shared = [gip10k, ic], local = [usb_device, serial], priority = 1)]
+    #[task(binds = USB, shared = [gip10k], local = [usb_device, serial], priority = 1)]
     fn usb_handler(mut ctx: usb_handler::Context) {
         let usb_device = ctx.local.usb_device;
         let serial = ctx.local.serial;
@@ -200,26 +205,33 @@ mod app {
                     });
                 }
 
+                Ok(size) if size > 0 => {
+                    let _ = serial.write_packet(&data);
+                }
+
                 _ => return,
             }
         }
-
-        ctx.shared.ic.lock(|ic| ic.unpend(IRQ::USB.into()));
     }
 
     // next column
-    #[task(binds = TIM17, shared = [gip10k, ic], local = [col_timer], priority = 3)]
+    #[task(binds = TIM17, shared = [gip10k], local = [col_timer, t: bool = false], priority = 3)]
     fn tim17_handler(mut ctx: tim17_handler::Context) {
         let _ = ctx.local.col_timer.wait(); // clear it flag
-        ctx.shared.ic.lock(|ic| ic.unpend(IRQ::TIM17.into()));
-        ctx.shared.gip10k.lock(|gip10k| gip10k.next_column());
+        if *ctx.local.t {
+            ctx.shared.gip10k.lock(|gip10k| gip10k.apply_new_column());
+            ctx.local.col_timer.start(COLUMN_TICK_RATE_HZ.hz());
+        } else {
+            ctx.shared.gip10k.lock(|gip10k| gip10k.next_column());
+            ctx.local.col_timer.start(POST_DMA_DELAY_HZ.hz());
+        }
+        *ctx.local.t = !*ctx.local.t;
     }
 
     // column writen
-    #[task(binds = DMA1_CH2_3, shared = [gip10k, ic], priority = 2)]
+    #[task(binds = DMA1_CH2_3, shared = [gip10k], priority = 2)]
     fn dma1_ch2_3_handler(mut ctx: dma1_ch2_3_handler::Context) {
-        ctx.shared.ic.lock(|ic| ic.unpend(IRQ::DMA1_CH2_3.into()));
-        ctx.shared.gip10k.lock(|gip10k| gip10k.column_writen());
+        ctx.shared.gip10k.lock(|gip10k| gip10k.column_data_writen());
     }
 
     //-------------------------------------------------------------------------
