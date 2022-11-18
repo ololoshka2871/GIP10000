@@ -35,6 +35,7 @@ where
     }
 
     pub fn set_colum_pixels(&mut self, pixels: StaticBufReader) {
+        self.dma.stop();
         self.dma.clear_interrupt();
 
         let (ptr, len) = unsafe { pixels.read_buffer() };
