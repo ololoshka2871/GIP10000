@@ -7,7 +7,7 @@ version = "0.2.0"
 resolver = "2"
 
 [dependencies]
-#num = { version = "0.4", default-features = false, features = ["alloc"] }
+num = { version = "0.4", default-features = false }
 #num-derive = "0.3"
 #num-traits = { version = "0.2", default-features = false }
 #static_assertions = "1.1.0"
@@ -16,7 +16,7 @@ resolver = "2"
 #bitflags = "1.0.4"
 
 embedded-hal = { version = "0.2.4", features = ["unproven"] }
-embedded-dma = "0.2"
+embedded-dma = "0.1.2"
 cortex-m = "0.7.3"
 cortex-m-rt = "0.7"
 
@@ -30,6 +30,7 @@ usbd-serial = { path = "lib/usbd-serial" }
 panic-abort = "0.3"
 
 stm32f0xx-hal = { version = "0.18.0", features = ["rt"], optional = true }
+stm32f0xx-hal-dma = { path = "lib/stm32f0xx-hal-dma", features = ["rt"], optional = true }
 
 cortex-m-rtic = { version = "1.1" }
 systick-monotonic = "1.0.1"
@@ -42,7 +43,7 @@ codegen-units = 1 # better optimizations
 panic = "abort"
 #lto = true
 # Если не влезает
-opt-level = "z"
+opt-level = 1
 
 [profile.release]
 opt-level = "s"
@@ -56,4 +57,4 @@ default = [
   "stm32f072",
 ]
 
-stm32f072 = ["stm32f0xx-hal/stm32f072", "stm32f0xx-hal/stm32-usbd"]
+stm32f072 = ["stm32f0xx-hal/stm32f072", "stm32f0xx-hal/stm32-usbd", "stm32f0xx-hal-dma"]

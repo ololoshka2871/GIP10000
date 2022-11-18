@@ -1,0 +1,37 @@
+[package]
+edition = "2018"
+authors = [
+    "matoushybl",
+]
+categories = [
+    "embedded",
+    "hardware-support",
+    "no-std",
+]
+description = "DMA dupport for STM32F0xx MCUs"
+license = "0BSD"
+name = "stm32f0xx-hal-dma"
+version = "0.1.0"
+
+[dependencies]
+#bare-metal = { version = "1.0.0" }
+cast = { version = "0.2", default-features = false }
+#cortex-m = "0.6"
+#embedded-hal = { version = "0.2", features = ["unproven"] }
+stm32f0 = "0.14"
+#nb = "1.0"
+embedded-dma = "0.1.2"
+#void = { version = "1.0", default-features = false }
+stm32f0xx-hal = { version = "0.18.0" }
+
+[features]
+rt = ["stm32f0/rt", "stm32f0xx-hal/rt"]
+
+[profile.dev]
+debug = true
+lto = true
+
+[profile.release]
+lto = true
+debug = true
+opt-level = "s"

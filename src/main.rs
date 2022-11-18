@@ -1,17 +1,24 @@
 #![no_main]
 #![no_std]
+#![feature(default_alloc_error_handler)]
+#![feature(slice_from_ptr_range)]
 
+mod output;
 mod support;
-
-mod config;
 
 use panic_abort as _;
 use rtic::app;
 
+use stm32f0xx_hal::gpio::gpioa::{PA1, PA5, PA6, PA7};
+use stm32f0xx_hal::gpio::{Alternate, Output, PushPull, AF0};
+use stm32f0xx_hal::pac::{gpiof, DMA1, GPIOB, SPI1, TIM17};
 use stm32f0xx_hal::prelude::*;
+use stm32f0xx_hal::spi::{self, EightBit, Spi};
 use stm32f0xx_hal::usb::{Peripheral, UsbBusType};
 
 use stm32f0xx_hal::stm32f0::stm32f0x2::Interrupt as IRQ;
+
+use stm32f0xx_hal_dma::dma::{dma1::C3, DmaExt};
 
 use systick_monotonic::Systick;
 
@@ -19,11 +26,19 @@ use stm32_usbd::UsbBus;
 use usb_device::class_prelude::*;
 use usb_device::prelude::*;
 
+use systick_monotonic::*;
+
 use usbd_serial::CdcAcmClass;
 
-use support::{IInterruptController, InterruptController};
+use support::{DMASpi, IInterruptController, InterruptController, SPITxDmaChannel};
+
+use output::AnodesDriver;
 
 const CDC_POCKET_SIZE: u16 = 64;
+
+parralel_port!(Catodes, GPIOB, gpiob::Parts, gpiof::RegisterBlock,
+    u16 => ([pb3: 3], [pb4: 4], [pb5: 5], [pb6: 6], [pb7: 7], [pb8: 8], [pb12: 12], [pb13: 13])
+);
 
 #[app(device = stm32f0xx_hal::pac, peripherals = true, dispatchers = [ADC_COMP])]
 mod app {
@@ -31,8 +46,29 @@ mod app {
 
     #[shared]
     struct Shared {
+        /*
+        gip10k: crate::output::Gip10000llDriver<
+            SPI1,
+            (
+                PA5<Alternate<1>>,
+                PA6<Alternate<1>>,
+                PA7<Alternate<1>>,
+            ),
+            PA1<Output<PushPull>>,
+            TIM17,
+            DMA1,
+            Catodes,
+            3,
+        >,
+        */
         #[lock_free]
         ic: InterruptController,
+
+        anodes: AnodesDriver<
+            DMASpi<SPI1, PA5<Alternate<AF0>>, PA6<Alternate<AF0>>, PA7<Alternate<AF0>>, EightBit>,
+            SPITxDmaChannel<C3>,
+            PA1<Output<PushPull>>,
+        >,
     }
 
     #[local]
@@ -58,17 +94,28 @@ mod app {
             .sysclk(48.mhz())
             .freeze(&mut flash);
 
-        let ic = InterruptController::new(cx.core.NVIC);
-
         let mono = Systick::new(cx.core.SYST, rcc.clocks.sysclk().0);
 
+        //---------------------------------------------------------------------
+
         let gpioa = cx.device.GPIOA.split(&mut rcc);
+
+        let (sck, miso, mosi, pin_dm, pin_dp, latch) = cortex_m::interrupt::free(|cs| {
+            (
+                gpioa.pa5.into_alternate_af0(cs),
+                gpioa.pa6.into_alternate_af0(cs),
+                gpioa.pa7.into_alternate_af0(cs),
+                gpioa.pa11,
+                gpioa.pa12,
+                gpioa.pa1.into_push_pull_output_hs(cs),
+            )
+        });
 
         // usb
         let usb = stm32f0xx_hal::usb::Peripheral {
             usb: cx.device.USB,
-            pin_dm: gpioa.pa11,
-            pin_dp: gpioa.pa12,
+            pin_dm,
+            pin_dp,
         };
 
         unsafe { USB_BUS.replace(stm32_usbd::UsbBus::new(usb)) };
@@ -88,14 +135,75 @@ mod app {
         .device_class(usbd_serial::USB_CLASS_CDC)
         .build();
 
+        //---------------------------------------------------------------------
+
+        let spi1 = Spi::spi1(
+            cx.device.SPI1,
+            (sck, miso, mosi),
+            spi::Mode {
+                polarity: spi::Polarity::IdleHigh,
+                phase: spi::Phase::CaptureOnFirstTransition,
+            },
+            1.mhz(), // fixme!
+            &mut rcc,
+        );
+
+        let mut spi1_dma = cx.device.DMA1.split(&mut rcc).3; // SPI1_TX
+        spi1_dma.listen(stm32f0xx_hal_dma::dma::Event::TransferComplete);
+        //spi1_dma.ch().cr.modify(|_, w| w.dir().from_peripheral());
+
+        let _timer =
+            stm32f0xx_hal::timers::Timer::tim17(cx.device.TIM17, (100 * 25).hz(), &mut rcc);
+
+        let anodes = output::AnodesDriver::new(
+            support::DMASpi::new(spi1),
+            support::SPITxDmaChannel::new(spi1_dma),
+            latch,
+        );
+
+        initiator::spawn_after(10.millis()).unwrap();
+
         (
-            Shared { ic },
+            Shared {
+                ic: InterruptController::new(cx.core.NVIC),
+                /*
+                gip10k: Gip10000llDriver::new(
+                    timer,
+                    spi1,
+                    latch,
+                    spi1_dma,
+                    Catodes::init(cx.device.GPIOB, &mut rcc),
+                    crate::output::Offsets {
+                        oe1: Catodes::get_mask_for_pin(12),
+                        oe2: Catodes::get_mask_for_pin(13),
+                        a: Catodes::get_mask_for_pin(3),
+                        b: Catodes::get_mask_for_pin(4),
+                        c: Catodes::get_mask_for_pin(5),
+                        d: Catodes::get_mask_for_pin(6),
+                        e: Catodes::get_mask_for_pin(7),
+                        f: Catodes::get_mask_for_pin(8),
+                    },
+                ),
+                */
+                anodes,
+            },
             Local {
                 usb_device: usb_dev,
                 serial,
             },
             init::Monotonics(mono),
         )
+    }
+
+    #[task(shared = [anodes], local = [b: [u8; 13] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]] )]
+    fn initiator(mut ctx: initiator::Context) {
+        let pixels = output::static_buf_reader::StaticBufReader::from(ctx.local.b.as_ptr_range());
+
+        ctx.shared
+            .anodes
+            .lock(|anodes| anodes.set_colum_pixels(pixels));
+
+        initiator::spawn_after(10.millis()).unwrap();
     }
 
     #[task(binds = USB, shared = [ic], local = [usb_device, serial], priority = 1)]
@@ -124,13 +232,12 @@ mod app {
     fn tim17_handler(_ctx: tim17_handler::Context) {
 
     }
-
-    // column writen
-    #[task(binds = DMA1_CH2_3)]
-    fn dma1_ch2_3_handler(_ctx: dma1_ch2_3_handler::Context) {
-
-    }
     */
+    // column writen
+    #[task(binds = DMA1_CH2_3, shared = [anodes])]
+    fn dma1_ch2_3_handler(mut ctx: dma1_ch2_3_handler::Context) {
+        ctx.shared.anodes.lock(|anodes| anodes.on_spi_done());
+    }
 
     #[idle]
     fn idle(_: idle::Context) -> ! {

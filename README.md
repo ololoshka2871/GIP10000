@@ -9,3 +9,8 @@
 1. flash - use openocd
 2. log - defmt log, stagt debuginf first!
 
+## Connections
+Anodes: 
+ * SO - PA7
+ * SCK - PA5
+ * LATCH - PA1
