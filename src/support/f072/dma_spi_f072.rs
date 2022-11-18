@@ -13,7 +13,7 @@ impl<SPI, SCKPIN, MISOPIN, MOSIPIN, WIDTH> DMASpi<SPI, SCKPIN, MISOPIN, MOSIPIN,
 
 macro_rules! dma_spi {
     ($spi: ty) => {
-        impl<SCKPIN, MISOPIN, MOSIPIN, WIDTH> super::IDMASpi
+        impl<SCKPIN, MISOPIN, MOSIPIN, WIDTH> super::super::IDMASpi
             for DMASpi<$spi, SCKPIN, MISOPIN, MOSIPIN, WIDTH>
         {
             fn enable_dma_event(&mut self) {

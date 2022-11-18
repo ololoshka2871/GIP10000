@@ -15,7 +15,7 @@ impl<DMACH> SPITxDmaChannel<DMACH> {
 
 macro_rules! make_spi_tx_channel {
     ($ch: ty, $cgifn: ident) => {
-        impl super::ISPITxDmaChannel for SPITxDmaChannel<$ch> {
+        impl super::super::ISPITxDmaChannel for SPITxDmaChannel<$ch> {
             fn set_peripheral_address(&mut self, address: u32, inc: bool) {
                 self.0.set_peripheral_address(address, inc);
             }
