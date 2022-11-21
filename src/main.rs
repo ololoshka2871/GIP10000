@@ -9,7 +9,7 @@ mod support;
 use panic_abort as _;
 use rtic::app;
 
-use stm32f0xx_hal::gpio::gpioa::{PA1, PA5, PA6, PA7};
+use stm32f0xx_hal::gpio::gpioa::{PA0, PA1, PA5, PA6, PA7};
 use stm32f0xx_hal::gpio::{Alternate, Output, PushPull, AF0};
 use stm32f0xx_hal::pac::{gpiof, GPIOB, SPI1, TIM17};
 use stm32f0xx_hal::prelude::*;
@@ -58,10 +58,12 @@ mod app {
         usb_device: UsbDevice<'static, UsbBusType>,
         serial: CdcAcmClass<'static, UsbBus<Peripheral>>,
         col_timer: stm32f0xx_hal::timers::Timer<TIM17>,
+
+        led: PA0<Output<PushPull>>,
     }
 
     #[monotonic(binds = SysTick, default = true)]
-    type MonoTimer = Systick<1000>;
+    type MonoTimer = Systick<100>;
 
     #[init]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
@@ -83,7 +85,7 @@ mod app {
 
         let gpioa = cx.device.GPIOA.split(&mut rcc);
 
-        let (sck, miso, mosi, pin_dm, pin_dp, mut latch) = cortex_m::interrupt::free(|cs| {
+        let (sck, miso, mosi, pin_dm, pin_dp, mut latch, led) = cortex_m::interrupt::free(|cs| {
             (
                 gpioa.pa5.into_alternate_af0(cs),
                 gpioa.pa6.into_alternate_af0(cs),
@@ -91,6 +93,7 @@ mod app {
                 gpioa.pa11,
                 gpioa.pa12,
                 gpioa.pa1.into_push_pull_output_hs(cs),
+                gpioa.pa0.into_push_pull_output(cs),
             )
         });
 
@@ -172,6 +175,7 @@ mod app {
                 usb_device: usb_dev,
                 serial,
                 col_timer,
+                led,
             },
             init::Monotonics(mono),
         )
@@ -179,8 +183,9 @@ mod app {
 
     //-------------------------------------------------------------------------
 
-    #[task(binds = USB, shared = [gip10k], local = [usb_device, serial], priority = 1)]
+    #[task(binds = USB, shared = [gip10k], local = [usb_device, serial, led], priority = 1)]
     fn usb_handler(mut ctx: usb_handler::Context) {
+        let _ = ctx.local.led.set_high();
         let usb_device = ctx.local.usb_device;
         let serial = ctx.local.serial;
 
@@ -209,9 +214,10 @@ mod app {
                     let _ = serial.write_packet(&data);
                 }
 
-                _ => return,
+                _ => {}
             }
         }
+        let _ = ctx.local.led.set_low();
     }
 
     // next column
@@ -236,10 +242,12 @@ mod app {
 
     //-------------------------------------------------------------------------
 
-    #[idle]
-    fn idle(_: idle::Context) -> ! {
+    #[idle(/*local = [led]*/)]
+    fn idle(ctx: idle::Context) -> ! {
         loop {
+            //let _ = ctx.local.led.set_high();
             cortex_m::asm::wfi();
+            //let _ = ctx.local.led.set_low();
         }
     }
 }
