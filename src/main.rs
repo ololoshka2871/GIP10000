@@ -127,7 +127,7 @@ mod app {
             cx.device.SPI1,
             (sck, miso, mosi),
             spi::Mode {
-                polarity: spi::Polarity::IdleHigh,
+                polarity: spi::Polarity::IdleLow,
                 phase: spi::Phase::CaptureOnFirstTransition,
             },
             SPI_CLOCK_KHZ.khz(),
