@@ -51,11 +51,11 @@ where
     pub fn latch_with<T, F: FnOnce() -> T>(&mut self, f: F) -> T {
         use core::{sync::atomic::compiler_fence, sync::atomic::Ordering};
 
-        let _ = self.latch.set_high();
+        let _ = self.latch.set_low();
         compiler_fence(Ordering::SeqCst);
         let res = f();
         compiler_fence(Ordering::SeqCst);
-        let _ = self.latch.set_low();
+        let _ = self.latch.set_high();
         res
     }
 
