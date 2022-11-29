@@ -30,7 +30,7 @@ use support::{DMASpi, SPITxDmaChannel};
 
 const CDC_POCKET_SIZE: u16 = 64;
 
-const SPI_CLOCK_KHZ: u32 = 500;
+const SPI_CLOCK_KHZ: u32 = 1000;
 const FPS: u32 = 30;
 const COLUMN_TICK_RATE_HZ: u32 = crate::output::COLUMNS_COUNT as u32 * FPS;
 const POST_DMA_DELAY_HZ: u32 = 7500; // Подбирается экспериментально, чтобы latch был после SPI посылки
@@ -128,7 +128,7 @@ mod app {
             (sck, miso, mosi),
             spi::Mode {
                 polarity: spi::Polarity::IdleHigh,
-                phase: spi::Phase::CaptureOnSecondTransition,
+                phase: spi::Phase::CaptureOnFirstTransition,
             },
             SPI_CLOCK_KHZ.khz(),
             &mut rcc,
@@ -137,8 +137,11 @@ mod app {
         {
             // force reset anodes
             let _ = spi1.write(&[0u8; 16]);
-            let _ = latch.set_high();
             let _ = latch.set_low();
+            for _ in 1..100 {
+                cortex_m::asm::nop();
+            }
+            let _ = latch.set_high();
         }
 
         let mut spi1_dma = cx.device.DMA1.split(&mut rcc).3; // SPI1_TX
