@@ -53,7 +53,7 @@ where
             FRONT_BUFFER
                 .iter_mut()
                 .enumerate()
-                .for_each(|(_i, p)| *p = 0x55);
+                .for_each(|(_i, p)| *p = 0);
         }
 
         Self {

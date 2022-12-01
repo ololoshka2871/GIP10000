@@ -159,7 +159,7 @@ mod app {
             support::DMASpi::new(spi1),
             latch,
             support::SPITxDmaChannel::new(spi1_dma),
-            Catodes::init(cx.device.GPIOB, &mut rcc),
+            Catodes::init(cx.device.GPIOB, &mut rcc, true),
             crate::output::Offsets {
                 oe1: Catodes::get_mask_for_pin(12),
                 oe2: Catodes::get_mask_for_pin(13),

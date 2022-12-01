@@ -4,16 +4,20 @@ macro_rules! parralel_port {
         pub struct $name{
             regs_ptr: usize,
             mask: $valuetype,
+            invert: bool,
         }
 
         impl $name {
-            pub fn init(port: $port, rcc: &mut stm32f0xx_hal::rcc::Rcc) -> Self {
+            pub fn init(port: $port, rcc: &mut stm32f0xx_hal::rcc::Rcc, invert: bool) -> Self {
                 let parts = port.split(rcc);
                 let mut mask = 0;
 
                 cortex_m::interrupt::free(|cs| {
                     $(
-                        let _pin = parts.$pin.into_push_pull_output(cs);
+                        let mut pin = parts.$pin.into_push_pull_output(cs);
+                        if invert {
+                            let _ = pin.set_high();
+                        }
                         mask |= 1 << ($bit_n);
                     )*
                });
@@ -21,6 +25,7 @@ macro_rules! parralel_port {
                 Self {
                     regs_ptr: <$port>::ptr() as _,
                     mask,
+                    invert,
                 }
             }
 
@@ -30,9 +35,14 @@ macro_rules! parralel_port {
         }
 
         impl crate::output::Bus<$valuetype> for $name {
-            fn write(&mut self, data: $valuetype) {
+            fn write(&mut self, mut data: $valuetype) {
                 unsafe {
                     let rb = &*(self.regs_ptr as *mut $regs);
+
+                    if self.invert {
+                        data = !data;
+                    }
+
                     rb.bsrr.write(|w| w.bits(
                         (((self.mask & !data) as u32) << 16) // reset
                         | (data as u32) //set
